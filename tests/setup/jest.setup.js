@@ -9,12 +9,12 @@ process.env.LOG_LEVEL = 'error'; // Reduce log noise during tests
 global.testUtils = {
   // Generate unique test IDs
   generateTestId: () => `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-  
+
   // Create test directories
   createTestDir: async (fs, dir) => {
     await fs.mkdir(dir, { recursive: true });
   },
-  
+
   // Clean up test directories
   cleanupTestDir: async (fs, dir) => {
     try {
@@ -23,10 +23,10 @@ global.testUtils = {
       // Ignore cleanup errors
     }
   },
-  
+
   // Wait for async operations
-  wait: (ms) => new Promise(resolve => setTimeout(resolve, ms)),
-  
+  wait: ms => new Promise(resolve => setTimeout(resolve, ms)),
+
   // Mock console methods during tests
   mockConsole: () => {
     const originalConsole = { ...console };
@@ -40,7 +40,7 @@ global.testUtils = {
       console.error = originalConsole.error;
       console.warn = originalConsole.warn;
     });
-  }
+  },
 };
 
 // Common test timeout

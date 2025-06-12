@@ -5,6 +5,7 @@
 ### Core Configuration
 
 #### TASKS_DIR
+
 - **Description**: Directory where task files are stored
 - **Default**: `.tasks` (in current directory)
 - **Example**: `/Users/username/Documents/tasks`
@@ -14,6 +15,7 @@ TASKS_DIR=/path/to/tasks node src/mcp/server.js
 ```
 
 #### LOG_LEVEL
+
 - **Description**: Logging verbosity level
 - **Default**: `info`
 - **Options**: `debug`, `info`, `warn`, `error`
@@ -22,24 +24,28 @@ TASKS_DIR=/path/to/tasks node src/mcp/server.js
 ### Git Integration
 
 #### ENABLE_GIT
+
 - **Description**: Enable Git integration features
 - **Default**: `false`
 - **Options**: `true`, `false`, `1`, `0`
 - **Example**: `ENABLE_GIT=true`
 
 When enabled, provides:
+
 - Branch per task workflow
 - Commit tracking
 - Code rollback capabilities
 - Merge management
 
 #### CODE_DIR
+
 - **Description**: Directory containing your code repository
 - **Default**: Current working directory
 - **Example**: `/Users/username/my-project`
 - **Note**: Only used when `ENABLE_GIT=true`
 
 #### AUTO_COMMIT
+
 - **Description**: Automatically commit changes when updating tasks
 - **Default**: `true`
 - **Options**: `true`, `false`
@@ -49,6 +55,7 @@ When enabled, provides:
 ### Database Configuration
 
 #### GRAPH_DB_PATH
+
 - **Description**: Custom path for KuzuDB database files
 - **Default**: `{TASKS_DIR}/kuzudb`
 - **Example**: `/var/lib/perun-flow/graph.db`
@@ -127,6 +134,7 @@ You can configure multiple instances for different projects:
 ## Command Line Usage
 
 ### Direct Server Start
+
 ```bash
 # Basic
 node src/mcp/server.js
@@ -142,6 +150,7 @@ LOG_LEVEL=debug node src/mcp/server.js
 ```
 
 ### Development Mode
+
 ```bash
 # With file watching (auto-restart on changes)
 npm run dev
@@ -158,21 +167,25 @@ npm run dev
 ## Troubleshooting
 
 ### Tasks Not Appearing
+
 - Check TASKS_DIR is set correctly
 - Ensure directory has write permissions
 - Look for errors in Claude Desktop logs
 
 ### Git Integration Not Working
+
 - Verify Git is installed and in PATH
 - Check CODE_DIR points to a Git repository
 - Ensure ENABLE_GIT is set to "true" (string, not boolean)
 
 ### Database Errors
+
 - Check disk space for KuzuDB files
 - Verify GRAPH_DB_PATH directory exists
 - Try deleting kuzudb directory to reset
 
 ### Permission Errors
+
 - Ensure user has read/write access to TASKS_DIR
 - Check file permissions on task files
 - On macOS/Linux, check directory ownership

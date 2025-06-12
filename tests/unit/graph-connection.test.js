@@ -17,7 +17,7 @@ class MockKuzuDatabase {
 
   execute(statement, params = {}) {
     const { query } = statement;
-    
+
     // Mock CREATE task
     if (query.includes('CREATE (t:Task')) {
       const task = {
@@ -29,7 +29,7 @@ class MockKuzuDatabase {
         priority: params.priority || 'medium',
         created_at: params.created_at || new Date().toISOString(),
         updated_at: params.updated_at || new Date().toISOString(),
-        file_path: params.file_path || null
+        file_path: params.file_path || null,
       };
       this.tasks.set(params.id, task);
       return Promise.resolve({ getAll: () => [] });
@@ -38,8 +38,8 @@ class MockKuzuDatabase {
     // Mock MATCH single task
     if (query.includes('MATCH (t:Task {id: $id})') && query.includes('RETURN t')) {
       const task = this.tasks.get(params.id);
-      return Promise.resolve({ 
-        getAll: () => task ? [{ t: task }] : [] 
+      return Promise.resolve({
+        getAll: () => (task ? [{ t: task }] : []),
       });
     }
 
@@ -65,7 +65,9 @@ class MockKuzuDatabase {
     // Mock GET dependencies
     if (query.includes('MATCH (t:Task {id: $id})-[:DEPENDS_ON]->(dep:Task)')) {
       const depIds = this.dependencies.get(params.id) || new Set();
-      const deps = Array.from(depIds).map(id => this.tasks.get(id)).filter(Boolean);
+      const deps = Array.from(depIds)
+        .map(id => this.tasks.get(id))
+        .filter(Boolean);
       return Promise.resolve({ getAll: () => deps });
     }
 
@@ -82,29 +84,29 @@ class MockKuzuDatabase {
     }
 
     // Mock FIND next task
-    if (query.includes('WHERE t.status = \'pending\'')) {
+    if (query.includes("WHERE t.status = 'pending'")) {
       // Find tasks with no incomplete dependencies
       const availableTasks = [];
       for (const task of this.tasks.values()) {
         if (task.status !== 'pending') continue;
-        
+
         const deps = this.dependencies.get(task.id) || new Set();
         const hasIncompleteDeps = Array.from(deps).some(depId => {
           const depTask = this.tasks.get(depId);
           return depTask && depTask.status !== 'done';
         });
-        
+
         if (!hasIncompleteDeps) {
           availableTasks.push(task);
         }
       }
-      
+
       // Sort by priority and return first
       availableTasks.sort((a, b) => {
         const priorityOrder = { high: 1, medium: 2, low: 3 };
         return priorityOrder[a.priority] - priorityOrder[b.priority];
       });
-      
+
       const result = availableTasks.length > 0 ? [{ t: availableTasks[0] }] : [];
       return Promise.resolve({ getAll: () => result });
     }
@@ -112,11 +114,11 @@ class MockKuzuDatabase {
     // Mock circular dependency detection
     if (query.includes('MATCH (t1:Task)-[:DEPENDS_ON*]->(t1)')) {
       const cycles = [];
-      
+
       // Simple cycle detection algorithm
       const visited = new Set();
       const recursionStack = new Set();
-      
+
       const hasCycle = (taskId, path = []) => {
         if (recursionStack.has(taskId)) {
           // Found cycle
@@ -125,30 +127,30 @@ class MockKuzuDatabase {
           cycles.push({ task_id: taskId, cycle });
           return true;
         }
-        
+
         if (visited.has(taskId)) return false;
-        
+
         visited.add(taskId);
         recursionStack.add(taskId);
         path.push(taskId);
-        
+
         const deps = this.dependencies.get(taskId) || new Set();
         for (const depId of deps) {
           if (hasCycle(depId, [...path])) {
             return true;
           }
         }
-        
+
         recursionStack.delete(taskId);
         return false;
       };
-      
+
       for (const taskId of this.tasks.keys()) {
         if (!visited.has(taskId)) {
           hasCycle(taskId);
         }
       }
-      
+
       return Promise.resolve({ getAll: () => cycles });
     }
 
@@ -164,7 +166,7 @@ class MockKuzuDatabase {
 // Mock the kuzu module at the top level
 const mockKuzu = {
   Database: jest.fn().mockImplementation(() => new MockKuzuDatabase()),
-  Connection: jest.fn().mockImplementation((db) => db)
+  Connection: jest.fn().mockImplementation(db => db),
 };
 
 jest.mock('kuzu', () => mockKuzu);
@@ -195,7 +197,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
         description: 'Create authentication endpoints',
         status: 'pending',
         priority: 'high',
-        file_path: '/tasks/api-task.md'
+        file_path: '/tasks/api-task.md',
       };
 
       // Action: Create task
@@ -203,7 +205,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
 
       // Verification: Should retrieve with all data preserved
       const retrieved = await graphConnection.getTask('task-123');
-      
+
       expect(retrieved).toMatchObject({
         id: 'task-123',
         semantic_id: 'API-1.01',
@@ -211,7 +213,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
         description: 'Create authentication endpoints',
         status: 'pending',
         priority: 'high',
-        file_path: '/tasks/api-task.md'
+        file_path: '/tasks/api-task.md',
       });
 
       // Should auto-generate timestamps
@@ -222,7 +224,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
     test('should apply sensible defaults for missing fields', async () => {
       const minimalTask = {
         id: 'minimal-task',
-        title: 'Simple Task'
+        title: 'Simple Task',
       };
 
       await graphConnection.createTask(minimalTask);
@@ -248,7 +250,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       await graphConnection.updateTask('update-test', {
         title: 'Updated Title',
         status: 'in-progress',
-        priority: 'high'
+        priority: 'high',
       });
 
       // Verify changes and preservation
@@ -276,7 +278,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       // Verify forward dependencies
       const dependencies = await graphConnection.getDependencies('task-a');
       expect(dependencies).toHaveLength(2);
-      
+
       const depIds = dependencies.map(d => d.id).sort();
       expect(depIds).toEqual(['task-b', 'task-c']);
 
@@ -294,7 +296,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       // Verify reverse dependencies
       const dependents = await graphConnection.getDependents('task-b');
       expect(dependents).toHaveLength(2);
-      
+
       const depIds = dependents.map(d => d.id).sort();
       expect(depIds).toEqual(['task-a', 'task-c']);
     });
@@ -327,23 +329,23 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
   describe('Task Discovery and Workflow', () => {
     test('should find next actionable task based on dependencies', async () => {
       // Setup complex scenario
-      await graphConnection.createTask({ 
-        id: 'blocked-task', 
-        title: 'Blocked Task', 
+      await graphConnection.createTask({
+        id: 'blocked-task',
+        title: 'Blocked Task',
         status: 'pending',
-        priority: 'high'
+        priority: 'high',
       });
-      await graphConnection.createTask({ 
-        id: 'dependency-task', 
-        title: 'Dependency', 
+      await graphConnection.createTask({
+        id: 'dependency-task',
+        title: 'Dependency',
         status: 'pending',
-        priority: 'medium'
+        priority: 'medium',
       });
-      await graphConnection.createTask({ 
-        id: 'ready-task', 
-        title: 'Ready Task', 
+      await graphConnection.createTask({
+        id: 'ready-task',
+        title: 'Ready Task',
         status: 'pending',
-        priority: 'low'
+        priority: 'low',
       });
 
       // Block the high-priority task
@@ -356,17 +358,17 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
     });
 
     test('should prioritize tasks by priority level', async () => {
-      await graphConnection.createTask({ 
-        id: 'low-priority', 
-        title: 'Low Priority', 
+      await graphConnection.createTask({
+        id: 'low-priority',
+        title: 'Low Priority',
         status: 'pending',
-        priority: 'low'
+        priority: 'low',
       });
-      await graphConnection.createTask({ 
-        id: 'high-priority', 
-        title: 'High Priority', 
+      await graphConnection.createTask({
+        id: 'high-priority',
+        title: 'High Priority',
         status: 'pending',
-        priority: 'high'
+        priority: 'high',
       });
 
       const nextTask = await graphConnection.findNextTask();
@@ -375,21 +377,21 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
 
     test('should return null when no actionable tasks exist', async () => {
       // Only create completed or blocked tasks
-      await graphConnection.createTask({ 
-        id: 'done-task', 
-        title: 'Done Task', 
-        status: 'done' 
+      await graphConnection.createTask({
+        id: 'done-task',
+        title: 'Done Task',
+        status: 'done',
       });
-      
-      await graphConnection.createTask({ 
-        id: 'blocked-task', 
-        title: 'Blocked Task', 
-        status: 'pending'
+
+      await graphConnection.createTask({
+        id: 'blocked-task',
+        title: 'Blocked Task',
+        status: 'pending',
       });
-      await graphConnection.createTask({ 
-        id: 'blocking-task', 
-        title: 'Blocking Task', 
-        status: 'pending'
+      await graphConnection.createTask({
+        id: 'blocking-task',
+        title: 'Blocking Task',
+        status: 'pending',
       });
       await graphConnection.addDependency('blocked-task', 'blocking-task');
 
@@ -413,7 +415,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       await graphConnection.addDependency('task-y', 'task-x');
 
       const cycles = await graphConnection.detectCircularDependencies();
-      
+
       expect(cycles.length).toBeGreaterThan(0);
       const involvedTasks = cycles.map(c => c.task_id);
       expect(involvedTasks).toContain('task-x');
@@ -426,7 +428,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       await graphConnection.addDependency('task-z', 'task-x');
 
       const cycles = await graphConnection.detectCircularDependencies();
-      
+
       expect(cycles.length).toBeGreaterThan(0);
       const involvedTasks = cycles.map(c => c.task_id);
       expect(involvedTasks).toContain('task-x');
@@ -449,14 +451,14 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
         id: 'consistency-test',
         title: 'Consistency Test',
         status: 'pending',
-        priority: 'medium'
+        priority: 'medium',
       });
 
       await graphConnection.updateTask('consistency-test', { status: 'in-progress' });
       await graphConnection.updateTask('consistency-test', { priority: 'high' });
-      await graphConnection.updateTask('consistency-test', { 
+      await graphConnection.updateTask('consistency-test', {
         title: 'Updated Consistency Test',
-        description: 'Added description'
+        description: 'Added description',
       });
 
       // Final state should reflect all changes
@@ -466,7 +468,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
         title: 'Updated Consistency Test',
         description: 'Added description',
         status: 'in-progress',
-        priority: 'high'
+        priority: 'high',
       });
     });
 
@@ -479,7 +481,7 @@ describe('GraphConnection Functional Tests (with Mock)', () => {
       // Update child task
       await graphConnection.updateTask('child', {
         title: 'Updated Child Task',
-        status: 'done'
+        status: 'done',
       });
 
       // Relationship should be preserved with updated data

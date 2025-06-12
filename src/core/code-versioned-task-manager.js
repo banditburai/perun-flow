@@ -25,40 +25,40 @@ export class CodeVersionedTaskManager extends TaskManager {
    */
   async startTask(taskId) {
     await this.sync.ensureSynced();
-    
+
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    
+
     // Check dependencies
     const deps = await this.checkDependencies(taskId);
     if (!deps.ready) {
       throw new Error(`Task has incomplete dependencies: ${deps.incomplete.join(', ')}`);
     }
-    
+
     // Create/switch to task branch
     const branchName = this.getBranchName(taskId, task.title);
     await this.createTaskBranch(branchName);
-    
+
     // Update task status
     await this.updateTaskStatus(taskId, 'in-progress');
-    
+
     // Log the start
     await this.journal.logOperation('task_started', {
       taskId,
       title: task.title,
-      branch: branchName
+      branch: branchName,
     });
-    
+
     // Initial commit on task branch
     if (this.autoCommit) {
       await this.commitCode(`Start task: ${task.title}`, taskId);
     }
-    
+
     return {
       taskId,
       branch: branchName,
       status: 'in-progress',
-      message: `Started task on branch: ${branchName}`
+      message: `Started task on branch: ${branchName}`,
     };
   }
 
@@ -68,30 +68,30 @@ export class CodeVersionedTaskManager extends TaskManager {
   async commitProgress(taskId, message, description = '') {
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    
+
     const branchName = this.getBranchName(taskId, task.title);
-    
+
     // Ensure we're on the right branch
     await this.switchToBranch(branchName);
-    
+
     // Commit current code state
     const commitHash = await this.commitCode(message, taskId, description);
-    
+
     if (commitHash) {
       // Log progress
       await this.journal.logOperation('progress_commit', {
         taskId,
         message,
         commitHash,
-        branch: branchName
+        branch: branchName,
       });
     }
-    
+
     return {
       taskId,
       commitHash,
       branch: branchName,
-      message: commitHash ? `Progress committed: ${message}` : 'No changes to commit'
+      message: commitHash ? `Progress committed: ${message}` : 'No changes to commit',
     };
   }
 
@@ -101,33 +101,33 @@ export class CodeVersionedTaskManager extends TaskManager {
   async completeTask(taskId, finalMessage = '') {
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    
+
     const branchName = this.getBranchName(taskId, task.title);
-    
+
     // Ensure we're on the right branch
     await this.switchToBranch(branchName);
-    
+
     // Final commit on task branch
     const finalCommitMessage = finalMessage || `Complete task: ${task.title}`;
     const commitHash = await this.commitCode(finalCommitMessage, taskId);
-    
+
     // Update task status
     await this.updateTaskStatus(taskId, 'done');
-    
+
     // Log completion
     await this.journal.logOperation('task_completed', {
       taskId,
       title: task.title,
       branch: branchName,
-      finalCommit: commitHash
+      finalCommit: commitHash,
     });
-    
+
     return {
       taskId,
       branch: branchName,
       finalCommit: commitHash,
       status: 'done',
-      message: `Task completed on branch: ${branchName}`
+      message: `Task completed on branch: ${branchName}`,
     };
   }
 
@@ -137,10 +137,10 @@ export class CodeVersionedTaskManager extends TaskManager {
   async rollbackTask(taskId, toCommit = null) {
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    
+
     const branchName = this.getBranchName(taskId, task.title);
     await this.switchToBranch(branchName);
-    
+
     if (toCommit) {
       // Rollback to specific commit
       await this.execGit(`reset --hard ${toCommit}`);
@@ -149,19 +149,19 @@ export class CodeVersionedTaskManager extends TaskManager {
       const startCommit = await this.getTaskStartCommit(branchName);
       await this.execGit(`reset --hard ${startCommit}`);
     }
-    
+
     // Log rollback
     await this.journal.logOperation('task_rollback', {
       taskId,
       branch: branchName,
-      toCommit: toCommit || 'start'
+      toCommit: toCommit || 'start',
     });
-    
+
     return {
       taskId,
       branch: branchName,
       rolledBackTo: toCommit || 'start',
-      message: `Rolled back task work to ${toCommit || 'task start'}`
+      message: `Rolled back task work to ${toCommit || 'task start'}`,
     };
   }
 
@@ -171,29 +171,32 @@ export class CodeVersionedTaskManager extends TaskManager {
   async getTaskHistory(taskId) {
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
-    
+
     const branchName = this.getBranchName(taskId, task.title);
-    
+
     try {
       // Switch to task branch
       await this.switchToBranch(branchName);
-      
+
       // Get commits on task branch
       const commits = await this.execGit(
         `log --oneline --grep="\\[${taskId}\\]" --format="%H|%s|%ad" --date=short`
       );
-      
+
       if (!commits) return [];
-      
-      return commits.split('\n').map(line => {
-        const [hash, message, date] = line.split('|');
-        return {
-          hash: hash?.substring(0, 8),
-          fullHash: hash,
-          message: message?.replace(`[${taskId}] `, ''),
-          date
-        };
-      }).filter(commit => commit.hash);
+
+      return commits
+        .split('\n')
+        .map(line => {
+          const [hash, message, date] = line.split('|');
+          return {
+            hash: hash?.substring(0, 8),
+            fullHash: hash,
+            message: message?.replace(`[${taskId}] `, ''),
+            date,
+          };
+        })
+        .filter(commit => commit.hash);
     } catch (error) {
       return []; // No commits yet
     }
@@ -207,32 +210,32 @@ export class CodeVersionedTaskManager extends TaskManager {
     if (!task || task.status !== 'done') {
       throw new Error(`Task must be completed before merging: ${taskId}`);
     }
-    
+
     const branchName = this.getBranchName(taskId, task.title);
-    
+
     // Switch to main branch
     await this.execGit('checkout main');
-    
+
     // Merge task branch
     await this.execGit(`merge ${branchName} --no-ff -m "Merge task: ${task.title}"`);
-    
+
     // Optionally delete task branch
     if (deleteAfterMerge) {
       await this.execGit(`branch -d ${branchName}`);
     }
-    
+
     // Log merge
     await this.journal.logOperation('task_merged', {
       taskId,
       branch: branchName,
-      deletedBranch: deleteAfterMerge
+      deletedBranch: deleteAfterMerge,
     });
-    
+
     return {
       taskId,
       merged: true,
       branchDeleted: deleteAfterMerge,
-      message: `Task ${taskId} merged to main`
+      message: `Task ${taskId} merged to main`,
     };
   }
 
@@ -242,7 +245,7 @@ export class CodeVersionedTaskManager extends TaskManager {
       // Check if branch exists
       const branches = await this.execGit('branch --list');
       const branchExists = branches.includes(branchName);
-      
+
       if (branchExists) {
         // Switch to existing branch
         await this.execGit(`checkout ${branchName}`);
@@ -269,21 +272,21 @@ export class CodeVersionedTaskManager extends TaskManager {
     try {
       // Stage all changes
       await this.execGit('add .');
-      
+
       // Check if there are changes to commit
       const status = await this.execGit('status --porcelain');
       if (!status.trim()) {
         log('info', 'No changes to commit');
         return null;
       }
-      
+
       // Create commit with consistent format
       const commitMessage = this.formatCommitMessage(message, taskId, description);
       await this.execGit(`commit -m "${commitMessage}"`);
-      
+
       // Get commit hash
       const commitHash = await this.execGit('rev-parse HEAD');
-      
+
       log('info', `Code committed: ${message} (${commitHash.substring(0, 8)})`);
       return commitHash.trim();
     } catch (error) {
@@ -293,15 +296,15 @@ export class CodeVersionedTaskManager extends TaskManager {
 
   formatCommitMessage(message, taskId, description) {
     let commit = `[${taskId}] ${message}`;
-    
+
     if (description) {
       commit += `\n\n${description}`;
     }
-    
+
     // Add task context
     commit += `\n\nTask-ID: ${taskId}`;
     commit += `\nGenerated-By: perun-flow`;
-    
+
     return commit;
   }
 
@@ -312,7 +315,7 @@ export class CodeVersionedTaskManager extends TaskManager {
       .replace(/[^a-z0-9\s]/g, '')
       .replace(/\s+/g, '-')
       .substring(0, 30);
-    
+
     return `task/${taskId}-${cleanTitle}`;
   }
 

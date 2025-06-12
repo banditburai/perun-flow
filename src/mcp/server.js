@@ -24,37 +24,37 @@ class TaskMasterMCPServer {
     this.server = new Server(
       {
         name: 'perun-flow',
-        version: '0.1.0'
+        version: '0.1.0',
       },
       {
         capabilities: {
-          tools: {}
-        }
+          tools: {},
+        },
       }
     );
-    
+
     // Determine tasks directory
     this.tasksDir = process.env.TASKS_DIR || path.join(process.cwd(), '.tasks');
-    
+
     // Check if Git integration is enabled
     this.gitEnabled = process.env.ENABLE_GIT === 'true' || process.env.ENABLE_GIT === '1';
-    
+
     // Initialize storage systems (but don't connect yet)
     this.fileStorage = new FileStorage(this.tasksDir);
     this.graphConnection = new GraphConnection(this.tasksDir);
-    
+
     // Use Git-enabled task manager if requested
     if (this.gitEnabled) {
       const codeDir = process.env.CODE_DIR || process.cwd();
       this.taskManager = new CodeVersionedTaskManager(this.fileStorage, this.graphConnection, {
         codeDir: codeDir,
-        autoCommit: process.env.AUTO_COMMIT !== 'false'
+        autoCommit: process.env.AUTO_COMMIT !== 'false',
       });
       log('info', `Git integration enabled for directory: ${codeDir}`);
     } else {
       this.taskManager = new TaskManager(this.fileStorage, this.graphConnection);
     }
-    
+
     this.syncEngine = new SyncEngine(this.fileStorage, this.graphConnection);
     this.initialized = false;
   }
@@ -66,12 +66,12 @@ class TaskMasterMCPServer {
     try {
       // Only register MCP tools - no heavy initialization
       registerTaskTools(this.server, this.taskManager, this.syncEngine, this);
-      
+
       // Handle errors
-      this.server.onerror = (error) => {
+      this.server.onerror = error => {
         log('error', 'MCP server error:', error);
       };
-      
+
       log('info', 'MCP server initialized');
     } catch (error) {
       log('error', `Failed to initialize MCP server: ${error.message}`);
@@ -86,17 +86,17 @@ class TaskMasterMCPServer {
     if (!this.initialized) {
       try {
         log('info', 'Performing lazy initialization of storage systems');
-        
+
         // Initialize storage systems
         await this.taskManager.initialize();
-        
+
         // Initial sync from files to graph (if files exist)
         const syncStatus = await this.syncEngine.verifySyncStatus();
         if (!syncStatus.in_sync) {
           log('info', 'Performing initial sync from files to graph');
           await this.syncEngine.syncFilesToGraph();
         }
-        
+
         this.initialized = true;
         log('info', 'Storage systems initialized successfully');
       } catch (error) {
@@ -112,13 +112,13 @@ class TaskMasterMCPServer {
   async start() {
     try {
       await this.initialize();
-      
+
       // Create stdio transport
       const transport = new StdioServerTransport();
-      
+
       // Connect server to transport
       await this.server.connect(transport);
-      
+
       log('info', 'MCP server started with stdio transport');
     } catch (error) {
       log('error', `Failed to start MCP server: ${error.message}`);
@@ -156,7 +156,7 @@ process.on('SIGTERM', async () => {
 });
 
 // Handle uncaught errors
-process.on('uncaughtException', (error) => {
+process.on('uncaughtException', error => {
   log('error', `Uncaught exception: ${error.message}`, error);
   process.exit(1);
 });

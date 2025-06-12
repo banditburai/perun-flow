@@ -1,4 +1,4 @@
-import { jest, describe, beforeEach, afterEach, test, expect } from '@jest/globals';
+import { describe, beforeEach, afterEach, test, expect } from '@jest/globals';
 import { FileStorage } from '../../src/storage/file-storage.js';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -36,17 +36,17 @@ describe('FileStorage Functional Tests', () => {
         created_at: '2025-06-11T12:00:00Z',
         dependencies: [
           { id: 'auth-service', status: 'done' },
-          { id: 'database-setup', status: 'in-progress' }
+          { id: 'database-setup', status: 'in-progress' },
         ],
         subtasks: [
           { title: 'Design API schema', is_complete: true },
           { title: 'Implement endpoints', is_complete: false },
-          { title: 'Add validation', is_complete: false }
+          { title: 'Add validation', is_complete: false },
         ],
         notes: [
           { timestamp: '2025-06-11T10:00:00Z', content: 'Started planning phase' },
-          { timestamp: '2025-06-11T11:00:00Z', content: 'Reviewed requirements' }
-        ]
+          { timestamp: '2025-06-11T11:00:00Z', content: 'Reviewed requirements' },
+        ],
       };
 
       // Action: Store the task
@@ -55,29 +55,38 @@ describe('FileStorage Functional Tests', () => {
 
       // Verification: Retrieve and verify all data is preserved
       const retrievedTask = await fileStorage.readTaskFile('task-123');
-      
+
       expect(retrievedTask).toMatchObject({
         id: 'task-123',
         semantic_id: 'API-1.01',
         title: 'Build REST API',
         description: 'Create user authentication endpoints',
         status: 'pending',
-        priority: 'high'
+        priority: 'high',
       });
 
       // Verify complex nested data
       expect(retrievedTask.dependencies).toHaveLength(2);
       expect(retrievedTask.dependencies[0]).toMatchObject({ id: 'auth-service', status: 'done' });
-      expect(retrievedTask.dependencies[1]).toMatchObject({ id: 'database-setup', status: 'in-progress' });
+      expect(retrievedTask.dependencies[1]).toMatchObject({
+        id: 'database-setup',
+        status: 'in-progress',
+      });
 
       expect(retrievedTask.subtasks).toHaveLength(3);
-      expect(retrievedTask.subtasks[0]).toMatchObject({ title: 'Design API schema', is_complete: true });
-      expect(retrievedTask.subtasks[1]).toMatchObject({ title: 'Implement endpoints', is_complete: false });
+      expect(retrievedTask.subtasks[0]).toMatchObject({
+        title: 'Design API schema',
+        is_complete: true,
+      });
+      expect(retrievedTask.subtasks[1]).toMatchObject({
+        title: 'Implement endpoints',
+        is_complete: false,
+      });
 
       expect(retrievedTask.notes).toHaveLength(2);
-      expect(retrievedTask.notes[0]).toMatchObject({ 
-        timestamp: '2025-06-11T10:00:00Z', 
-        content: 'Started planning phase' 
+      expect(retrievedTask.notes[0]).toMatchObject({
+        timestamp: '2025-06-11T10:00:00Z',
+        content: 'Started planning phase',
       });
     });
 
@@ -85,7 +94,7 @@ describe('FileStorage Functional Tests', () => {
       const minimalTask = {
         id: 'minimal-task',
         title: 'Simple Task',
-        status: 'pending'
+        status: 'pending',
       };
 
       await fileStorage.createTaskFile(minimalTask);
@@ -105,7 +114,7 @@ describe('FileStorage Functional Tests', () => {
         title: 'Data Integrity Test',
         status: 'pending',
         priority: 'medium',
-        dependencies: [{ id: 'dep1', status: 'done' }]
+        dependencies: [{ id: 'dep1', status: 'done' }],
       };
 
       // Create, read, verify
@@ -116,7 +125,7 @@ describe('FileStorage Functional Tests', () => {
       // Update status and verify data is preserved
       await fileStorage.updateTaskStatus('integrity-test', 'in-progress');
       retrieved = await fileStorage.readTaskFile('integrity-test');
-      
+
       expect(retrieved.status).toBe('in-progress');
       expect(retrieved.title).toBe('Data Integrity Test'); // Should preserve
       expect(retrieved.priority).toBe('medium'); // Should preserve
@@ -129,7 +138,7 @@ describe('FileStorage Functional Tests', () => {
       const task = {
         id: 'status-test',
         title: 'Status Test Task',
-        status: 'pending'
+        status: 'pending',
       };
 
       // Create in pending
@@ -155,9 +164,9 @@ describe('FileStorage Functional Tests', () => {
     });
 
     test('should handle non-existent task gracefully', async () => {
-      await expect(
-        fileStorage.updateTaskStatus('non-existent', 'done')
-      ).rejects.toThrow('Task non-existent not found');
+      await expect(fileStorage.updateTaskStatus('non-existent', 'done')).rejects.toThrow(
+        'Task non-existent not found'
+      );
     });
 
     test('should find tasks regardless of status directory', async () => {
@@ -165,13 +174,13 @@ describe('FileStorage Functional Tests', () => {
       await fileStorage.createTaskFile({
         id: 'pending-task',
         title: 'Pending Task',
-        status: 'pending'
+        status: 'pending',
       });
 
       await fileStorage.createTaskFile({
         id: 'progress-task',
         title: 'In Progress Task',
-        status: 'in-progress'
+        status: 'in-progress',
       });
 
       // Move one to done
@@ -192,7 +201,7 @@ describe('FileStorage Functional Tests', () => {
       const tasks = [
         { id: 'task-1', title: 'First Task', status: 'pending' },
         { id: 'task-2', title: 'Second Task', status: 'in-progress' },
-        { id: 'task-3', title: 'Third Task', status: 'done' }
+        { id: 'task-3', title: 'Third Task', status: 'done' },
       ];
 
       for (const task of tasks) {
@@ -200,9 +209,9 @@ describe('FileStorage Functional Tests', () => {
       }
 
       const allTasks = await fileStorage.listAllTasks();
-      
+
       expect(allTasks).toHaveLength(3);
-      
+
       const taskIds = allTasks.map(t => t.id).sort();
       expect(taskIds).toEqual(['task-1', 'task-2', 'task-3']);
 
@@ -224,15 +233,15 @@ describe('FileStorage Functional Tests', () => {
         status: 'pending',
         priority: 'high',
         dependencies: [{ id: 'dep1', status: 'done' }],
-        subtasks: [{ title: 'Subtask 1', is_complete: false }]
+        subtasks: [{ title: 'Subtask 1', is_complete: false }],
       };
 
       await fileStorage.createTaskFile(complexTask);
       const tasks = await fileStorage.listAllTasks();
-      
+
       expect(tasks).toHaveLength(1);
       const task = tasks[0];
-      
+
       expect(task.priority).toBe('high');
       expect(task.dependencies).toHaveLength(1);
       expect(task.subtasks).toHaveLength(1);
@@ -249,11 +258,11 @@ describe('FileStorage Functional Tests', () => {
 
       // Should have different filenames
       expect(path.basename(path1)).not.toBe(path.basename(path2));
-      
+
       // Should both be retrievable
       const retrieved1 = await fileStorage.readTaskFile('task-1');
       const retrieved2 = await fileStorage.readTaskFile('task-2');
-      
+
       expect(retrieved1.title).toBe('API Task');
       expect(retrieved2.title).toBe('UI Task');
     });
@@ -262,7 +271,7 @@ describe('FileStorage Functional Tests', () => {
       const task = {
         id: 'special-chars',
         title: 'Task with Special!@#$%^&*() Characters',
-        status: 'pending'
+        status: 'pending',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
@@ -273,12 +282,13 @@ describe('FileStorage Functional Tests', () => {
     });
 
     test('should handle very long titles', async () => {
-      const longTitle = 'This is a very long title that exceeds normal length limits and should be handled gracefully by the file storage system without breaking';
-      
+      const longTitle =
+        'This is a very long title that exceeds normal length limits and should be handled gracefully by the file storage system without breaking';
+
       const task = {
         id: 'long-title',
         title: longTitle,
-        status: 'pending'
+        status: 'pending',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
@@ -294,9 +304,9 @@ describe('FileStorage Functional Tests', () => {
       // Try to create in a new directory structure
       const deepPath = path.join(testDir, 'very', 'deep', 'nested', 'structure');
       const deepStorage = new FileStorage(deepPath);
-      
+
       await expect(deepStorage.initialize()).resolves.toBe(true);
-      
+
       // Should be able to create tasks
       const task = { id: 'deep-task', title: 'Deep Task', status: 'pending' };
       await expect(deepStorage.createTaskFile(task)).resolves.toBeTruthy();
@@ -308,11 +318,13 @@ describe('FileStorage Functional Tests', () => {
     });
 
     test('should handle concurrent operations', async () => {
-      const tasks = Array(10).fill(null).map((_, i) => ({
-        id: `concurrent-${i}`,
-        title: `Concurrent Task ${i}`,
-        status: 'pending'
-      }));
+      const tasks = Array(10)
+        .fill(null)
+        .map((_, i) => ({
+          id: `concurrent-${i}`,
+          title: `Concurrent Task ${i}`,
+          status: 'pending',
+        }));
 
       // Create all tasks concurrently
       const promises = tasks.map(task => fileStorage.createTaskFile(task));
@@ -323,9 +335,7 @@ describe('FileStorage Functional Tests', () => {
       expect(results.every(path => path)).toBe(true);
 
       // All should be retrievable
-      const retrieved = await Promise.all(
-        tasks.map(task => fileStorage.readTaskFile(task.id))
-      );
+      const retrieved = await Promise.all(tasks.map(task => fileStorage.readTaskFile(task.id)));
 
       expect(retrieved).toHaveLength(10);
       expect(retrieved.every(task => task !== null)).toBe(true);
@@ -342,7 +352,7 @@ describe('FileStorage Functional Tests', () => {
         created_at: '2025-06-11T12:00:00Z',
         dependencies: [],
         subtasks: [],
-        notes: []
+        notes: [],
       };
 
       await fileStorage.createTaskFile(task);
@@ -358,7 +368,7 @@ describe('FileStorage Functional Tests', () => {
       const bareMinimum = {
         id: 'minimal',
         title: 'Minimal Task',
-        status: 'pending'
+        status: 'pending',
         // No description, priority, etc.
       };
 

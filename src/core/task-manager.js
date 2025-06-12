@@ -23,15 +23,15 @@ export class TaskManager {
     await this.files.initialize();
     await this.graph.initialize();
     await this.journal.initialize();
-    
+
     // Initial sync on startup
     const syncResult = await this.sync.ensureSynced();
-    
+
     // Log the sync operation
     if (syncResult.changes > 0) {
       await this.journal.logSyncPerformed(syncResult);
     }
-    
+
     log('info', 'Task Manager initialized');
   }
 
@@ -40,12 +40,8 @@ export class TaskManager {
    */
   generateTaskId(title) {
     const timestamp = Date.now().toString(36);
-    const hash = crypto
-      .createHash('md5')
-      .update(title)
-      .digest('hex')
-      .substring(0, 6);
-    
+    const hash = crypto.createHash('md5').update(title).digest('hex').substring(0, 6);
+
     return `${timestamp}-${hash}`;
   }
 
@@ -54,18 +50,21 @@ export class TaskManager {
    */
   detectStream(title, description = '') {
     const text = `${title} ${description}`.toLowerCase();
-    
+
     // Check for specific keywords (order matters - more specific first)
     if (text.includes('test') || text.includes('spec') || text.includes('testing')) return 'TEST';
     if (text.includes('sync') || text.includes('synchron')) return 'SYNC';
-    if (text.includes('deploy') || text.includes('release') || text.includes('publish')) return 'DEPLOY';
-    if (text.includes('git') || text.includes('version control') || text.includes('commit')) return 'GIT';
+    if (text.includes('deploy') || text.includes('release') || text.includes('publish'))
+      return 'DEPLOY';
+    if (text.includes('git') || text.includes('version control') || text.includes('commit'))
+      return 'GIT';
     if (text.includes('doc') || text.includes('guide') || text.includes('readme')) return 'DOC';
     if (text.includes('api') || text.includes('endpoint') || text.includes('route')) return 'API';
     if (text.includes('auth') || text.includes('security') || text.includes('login')) return 'AUTH';
-    if (text.includes('data') || text.includes('database') || text.includes('schema')) return 'DATA';
+    if (text.includes('data') || text.includes('database') || text.includes('schema'))
+      return 'DATA';
     if (text.includes('ui') || text.includes('interface') || text.includes('frontend')) return 'UI';
-    
+
     return 'TASK'; // Generic fallback
   }
 
@@ -76,10 +75,10 @@ export class TaskManager {
     if (!dependencies || dependencies.length === 0) {
       return 1; // Base phase for tasks with no dependencies
     }
-    
+
     let maxPhase = 1; // Start with phase 1 as minimum
     let hasSemanticDeps = false;
-    
+
     // Find the highest phase among dependencies
     for (const depId of dependencies) {
       try {
@@ -97,7 +96,7 @@ export class TaskManager {
         // Ignore errors for missing dependencies
       }
     }
-    
+
     // If we found semantic dependencies, increment the phase
     // Otherwise, stay at phase 1
     return hasSemanticDeps ? maxPhase + 1 : 1;
@@ -109,7 +108,7 @@ export class TaskManager {
   async getNextSequence(stream, phase) {
     const tasks = await this.files.listAllTasks();
     let maxSequence = 0;
-    
+
     // Find highest sequence for this stream-phase
     for (const task of tasks) {
       if (task.semantic_id) {
@@ -120,7 +119,7 @@ export class TaskManager {
         }
       }
     }
-    
+
     return String(maxSequence + 1).padStart(2, '0');
   }
 
@@ -131,42 +130,43 @@ export class TaskManager {
     const stream = this.detectStream(title, description);
     const phase = await this.calculatePhase(dependencies);
     const sequence = await this.getNextSequence(stream, phase);
-    
+
     return `${stream}-${phase}.${sequence}`;
   }
 
   /**
    * Create a new task
    */
-  async createTask({ title, description, priority = 'medium', dependencies = [] }) {
+  async createTask({ title, description, priority = 'medium', dependencies = [], parent_id }) {
     try {
       // Validate required fields
       if (title === undefined || title === null) {
         throw new Error('Title is required');
       }
-      
+
       if (typeof title !== 'string' || title.trim() === '') {
         throw new Error('Title cannot be empty');
       }
-      
+
       // Validate priority
       const validPriorities = ['high', 'medium', 'low'];
       if (!validPriorities.includes(priority)) {
-        throw new Error(`Invalid priority: ${priority}. Must be one of: ${validPriorities.join(', ')}`);
+        throw new Error(
+          `Invalid priority: ${priority}. Must be one of: ${validPriorities.join(', ')}`
+        );
       }
-      
+
       // Validate dependencies is an array
       if (!Array.isArray(dependencies)) {
         throw new Error('Dependencies must be an array');
       }
-      
-      
+
       // Generate unique ID
       const id = this.generateTaskId(title);
-      
+
       // Generate semantic ID
       const semantic_id = await this.generateSemanticId(title, description, dependencies);
-      
+
       const task = {
         id,
         semantic_id,
@@ -178,29 +178,26 @@ export class TaskManager {
         dependencies: dependencies.map(depId => ({ id: depId, status: 'unknown' })),
         subtasks: [],
         files: [],
-        notes: []
+        notes: [],
       };
-      
+
+      // Add parent_id if provided
+      if (parent_id) {
+        task.parent_id = parent_id;
+      }
+
       // Create file first
       const filePath = await this.files.createTaskFile(task);
       task.file_path = filePath;
-      
-      // Clear sync cache since we created a file
-      this.sync.clearCache();
-      
-      // Create in graph
-      await this.graph.createTask(task);
-      
-      // Add dependencies in graph
-      for (const depId of dependencies) {
-        await this.graph.addDependency(id, depId);
-      }
-      
+
+      // Immediate sync: create in graph right away
+      await this.sync.syncNewTask(task);
+
       // Journal the creation
       await this.journal.logTaskCreated(task);
-      
+
       log('info', `Created task: ${semantic_id} (${id}) - ${title}`);
-      
+
       return { id, semantic_id, title, file_path: filePath };
     } catch (error) {
       log('error', `Failed to create task: ${error.message}`);
@@ -213,19 +210,19 @@ export class TaskManager {
    */
   async getTask(taskId) {
     try {
-      // Ensure graph is synced before reading dependencies
-      await this.sync.ensureSynced();
-      
+      // Medium priority sync: single task lookup
+      await this.sync.smartSync('medium');
+
       // Read from file (source of truth for content)
       const fileTask = await this.files.readTaskFile(taskId);
       if (!fileTask) {
         return null;
       }
-      
+
       // Get dependencies from graph
       const dependencies = await this.graph.getDependencies(taskId);
       fileTask.dependencies = dependencies;
-      
+
       return fileTask;
     } catch (error) {
       log('error', `Failed to get task ${taskId}: ${error.message}`);
@@ -243,28 +240,26 @@ export class TaskManager {
       if (!validStatuses.includes(newStatus)) {
         throw new Error(`Invalid status: ${newStatus}`);
       }
-      
+
       // Get current status for journaling
       const currentTask = await this.files.readTaskFile(taskId);
       const oldStatus = currentTask?.status || 'unknown';
-      
+
       // Update in file system (moves file)
       const newPath = await this.files.updateTaskStatus(taskId, newStatus);
-      
-      // Clear sync cache since we modified files
-      this.sync.clearCache();
-      
+
       // Update in graph
-      await this.graph.updateTask(taskId, { 
+      // Immediate sync: update graph right away
+      await this.sync.syncTaskUpdate(taskId, {
         status: newStatus,
-        file_path: newPath
+        file_path: newPath,
       });
-      
+
       // Journal the status change
       await this.journal.logTaskStatusUpdated(taskId, oldStatus, newStatus);
-      
+
       log('info', `Updated task ${taskId} status to ${newStatus}`);
-      
+
       return { id: taskId, status: newStatus, file_path: newPath };
     } catch (error) {
       log('error', `Failed to update task status: ${error.message}`);
@@ -279,20 +274,17 @@ export class TaskManager {
     try {
       // Add to file
       await this.files.addNote(taskId, noteContent);
-      
-      // Clear sync cache since we modified a file
-      this.sync.clearCache();
-      
-      // Update timestamp in graph
-      await this.graph.updateTask(taskId, {
-        updated_at: new Date().toISOString()
+
+      // Immediate sync: update graph right away
+      await this.sync.syncTaskUpdate(taskId, {
+        updated_at: new Date().toISOString(),
       });
-      
+
       // Journal the note addition
       await this.journal.logNoteAdded(taskId, noteContent);
-      
+
       log('info', `Added note to task ${taskId}`);
-      
+
       return { id: taskId, note_added: true };
     } catch (error) {
       log('error', `Failed to add note: ${error.message}`);
@@ -305,19 +297,19 @@ export class TaskManager {
    */
   async findNextTask() {
     try {
-      // Ensure graph is synced before finding next task
-      await this.sync.ensureSynced();
-      
+      // High priority sync: finding next task needs accurate data
+      await this.sync.smartSync('high');
+
       const nextTask = await this.graph.findNextTask();
-      
+
       if (!nextTask) {
         log('info', 'No actionable tasks found');
         return null;
       }
-      
+
       // Get full task details from file
       const fullTask = await this.getTask(nextTask.id);
-      
+
       return fullTask;
     } catch (error) {
       log('error', `Failed to find next task: ${error.message}`);
@@ -332,27 +324,27 @@ export class TaskManager {
     try {
       // Get all tasks from files
       const tasks = await this.files.listAllTasks();
-      
+
       // Apply filters
       let filtered = tasks;
-      
+
       if (filters.status) {
         filtered = filtered.filter(t => t.status === filters.status);
       }
-      
+
       if (filters.priority) {
         filtered = filtered.filter(t => t.priority === filters.priority);
       }
-      
+
       // Sort by priority and creation date
       const priorityOrder = { high: 1, medium: 2, low: 3 };
       filtered.sort((a, b) => {
         const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
         if (priorityDiff !== 0) return priorityDiff;
-        
+
         return new Date(a.created_at) - new Date(b.created_at);
       });
-      
+
       return filtered;
     } catch (error) {
       log('error', `Failed to list tasks: ${error.message}`);
@@ -365,25 +357,25 @@ export class TaskManager {
    */
   async checkDependencies(taskId) {
     try {
-      // Ensure graph is synced before checking dependencies
-      await this.sync.ensureSynced();
-      
+      // High priority sync: dependency checks are critical
+      await this.sync.smartSync('high');
+
       // Get task dependencies
       const dependencies = await this.graph.getDependencies(taskId);
-      
+
       // Check for circular dependencies
       const circles = await this.graph.detectCircularDependencies();
       const hasCircular = circles.some(c => c.task_id === taskId);
-      
+
       // Check which dependencies are blocking
       const blocking = dependencies.filter(dep => dep.status !== 'done');
-      
+
       return {
         task_id: taskId,
         dependencies: dependencies,
         blocking: blocking,
         has_circular: hasCircular,
-        ready: blocking.length === 0
+        ready: blocking.length === 0,
       };
     } catch (error) {
       log('error', `Failed to check dependencies: ${error.message}`);
@@ -396,19 +388,22 @@ export class TaskManager {
    */
   async getDependents(taskId) {
     try {
-      await this.sync.ensureSynced();
-      
+      // Medium priority sync: dependency queries
+      await this.sync.smartSync('medium');
+
       const dependents = await this.graph.getDependents(taskId);
-      
+
       // Check impact - which dependents would be blocked
-      const impacted = dependents.filter(dep => dep.status === 'pending' || dep.status === 'in-progress');
-      
+      const impacted = dependents.filter(
+        dep => dep.status === 'pending' || dep.status === 'in-progress'
+      );
+
       return {
         task_id: taskId,
         dependents: dependents,
         impacted: impacted,
         total_dependents: dependents.length,
-        blocked_count: impacted.length
+        blocked_count: impacted.length,
       };
     } catch (error) {
       log('error', `Failed to get dependents: ${error.message}`);
@@ -421,20 +416,21 @@ export class TaskManager {
    */
   async getFullDependencyGraph(taskId) {
     try {
-      await this.sync.ensureSynced();
-      
+      // High priority sync: full dependency graph needs complete data
+      await this.sync.smartSync('high');
+
       const [dependencies, dependents] = await Promise.all([
         this.graph.getDependencies(taskId),
-        this.graph.getDependents(taskId)
+        this.graph.getDependents(taskId),
       ]);
-      
+
       const task = await this.getTask(taskId);
-      
+
       return {
         task: {
           id: task.id,
           title: task.title,
-          status: task.status
+          status: task.status,
         },
         dependencies: dependencies,
         dependents: dependents,
@@ -442,8 +438,8 @@ export class TaskManager {
           total_dependencies: dependencies.length,
           completed_dependencies: dependencies.filter(d => d.status === 'done').length,
           total_dependents: dependents.length,
-          blocked_dependents: dependents.filter(d => d.status !== 'done').length
-        }
+          blocked_dependents: dependents.filter(d => d.status !== 'done').length,
+        },
       };
     } catch (error) {
       log('error', `Failed to get dependency graph: ${error.message}`);
@@ -460,21 +456,18 @@ export class TaskManager {
       if (!task) {
         throw new Error(`Task ${taskId} not found`);
       }
-      
+
       // Add subtasks to task
       task.subtasks = subtasks.map((title, index) => ({
         id: `${taskId}-${index + 1}`,
         title,
-        is_complete: false
+        is_complete: false,
       }));
-      
+
       // Update file
       await this.files.createTaskFile(task);
-      
-      // Clear sync cache since we modified a file
-      this.sync.clearCache();
-      
-      // Create subtask relationships in graph
+
+      // Create subtask relationships in graph immediately
       for (const subtask of task.subtasks) {
         // Create subtask as a task node
         await this.graph.createTask({
@@ -482,25 +475,24 @@ export class TaskManager {
           title: subtask.title,
           status: 'pending',
           priority: task.priority,
-          file_path: task.file_path // Same file as parent
+          file_path: task.file_path, // Same file as parent
         });
-        
-        // Create HAS_SUBTASK relationship
-        await this.graph.execute(`
-          MATCH (parent:Task {id: $parentId}), (child:Task {id: $childId})
-          CREATE (parent)-[:HAS_SUBTASK {position: $position}]->(child)
-        `, {
-          parentId: taskId,
-          childId: subtask.id,
-          position: task.subtasks.indexOf(subtask)
+
+        // Create unified PARENT_CHILD relationship for subtask
+        await this.graph.createUnifiedParentChildRelationship(taskId, subtask.id, 'subtask', {
+          position: task.subtasks.indexOf(subtask),
+          is_complete: false,
         });
       }
-      
+
+      // Record the change
+      this.sync.recordMcpChange(taskId, 'updated');
+
       // Journal the subtask creation
       await this.journal.logSubtasksAdded(taskId, subtasks.length);
-      
+
       log('info', `Broke down task ${taskId} into ${subtasks.length} subtasks`);
-      
+
       return { task_id: taskId, subtasks: task.subtasks };
     } catch (error) {
       log('error', `Failed to breakdown task: ${error.message}`);
@@ -516,24 +508,27 @@ export class TaskManager {
       // Get task info for journaling
       const task = await this.files.readTaskFile(taskId);
       const title = task?.title || 'Unknown';
-      
+
       // Delete from file system
       await this.files.deleteTaskFile(taskId);
-      
-      // Clear sync cache since we deleted a file
-      this.sync.clearCache();
-      
-      // Delete from graph (relationships are automatically deleted)
-      await this.graph.execute(`
+
+      // Delete from graph immediately (relationships are automatically deleted)
+      await this.graph.execute(
+        `
         MATCH (t:Task {id: $id})
         DELETE t
-      `, { id: taskId });
-      
+      `,
+        { id: taskId }
+      );
+
+      // Record the deletion
+      this.sync.recordMcpChange(taskId, 'deleted');
+
       // Journal the deletion
       await this.journal.logTaskDeleted(taskId, title);
-      
+
       log('info', `Deleted task ${taskId}`);
-      
+
       return { id: taskId, deleted: true };
     } catch (error) {
       log('error', `Failed to delete task: ${error.message}`);
@@ -554,16 +549,19 @@ export class TaskManager {
       }
 
       const analysis = this.decomposition.analyzeComplexity(task);
-      
+
       // Update task in graph with complexity metadata
-      await this.graph.execute(`
+      await this.graph.execute(
+        `
         MATCH (t:Task {id: $id})
         SET t.complexity_score = $score, t.is_atomic = $isAtomic
-      `, {
-        id: taskId,
-        score: analysis.complexityScore,
-        isAtomic: analysis.isAtomic
-      });
+      `,
+        {
+          id: taskId,
+          score: analysis.complexityScore,
+          isAtomic: analysis.isAtomic,
+        }
+      );
 
       log('info', `Analyzed complexity for task ${taskId}: ${analysis.complexityScore}`);
       return analysis;
@@ -581,8 +579,9 @@ export class TaskManager {
    */
   async decomposeTask(taskId, options = {}) {
     try {
-      await this.sync.ensureSynced();
-      
+      // High priority sync: decomposition needs to know all existing tasks
+      await this.sync.smartSync('high');
+
       const parentTask = await this.getTask(taskId);
       if (!parentTask) {
         throw new Error(`Task ${taskId} not found`);
@@ -601,7 +600,7 @@ export class TaskManager {
           decomposed: false,
           reason: 'Task does not need decomposition',
           analysis,
-          subtasks: []
+          subtasks: [],
         };
       }
 
@@ -615,30 +614,32 @@ export class TaskManager {
           title: spec.title,
           description: spec.description,
           priority: spec.priority || parentTask.priority,
-          dependencies: [] // Initially no dependencies between subtasks
+          dependencies: [], // Initially no dependencies between subtasks
+          parent_id: taskId,
         });
-        
-        // Create parent-child relationship
-        await this.graph.createParentChildRelationship(
-          taskId, 
-          subtask.id, 
-          options.decompositionType || 'automatic'
-        );
-        
+
+        // Create unified parent-child relationship
+        await this.graph.createUnifiedParentChildRelationship(taskId, subtask.id, 'decomposition', {
+          decomposition_type: options.decompositionType || 'automatic',
+        });
+
         createdSubtasks.push(subtask);
       }
 
       // Mark parent as having children
-      await this.graph.execute(`
+      await this.graph.execute(
+        `
         MATCH (t:Task {id: $id})
         SET t.has_children = true
-      `, { id: taskId });
+      `,
+        { id: taskId }
+      );
 
       // Journal the decomposition
       await this.journal.logOperation('task.decomposed', {
         parent_task_id: taskId,
         subtask_count: createdSubtasks.length,
-        decomposition_type: options.decompositionType || 'automatic'
+        decomposition_type: options.decompositionType || 'automatic',
       });
 
       log('info', `Decomposed task ${taskId} into ${createdSubtasks.length} subtasks`);
@@ -647,7 +648,7 @@ export class TaskManager {
         decomposed: true,
         parentTask,
         subtasks: createdSubtasks,
-        analysis
+        analysis,
       };
     } catch (error) {
       log('error', `Failed to decompose task: ${error.message}`);
@@ -662,13 +663,17 @@ export class TaskManager {
    */
   async getTaskChildren(taskId) {
     try {
-      await this.sync.ensureSynced();
-      
+      // Medium priority sync: hierarchy queries
+      await this.sync.smartSync('medium');
+
       const children = await this.graph.getChildren(taskId);
       return children.map(result => ({
         ...result.child,
         decomposed_at: result.decomposed_at,
-        decomposition_type: result.decomposition_type
+        decomposition_type: result.decomposition_type,
+        relationship_type: result.relationship_type,
+        position: result.position,
+        is_complete: result.is_complete,
       }));
     } catch (error) {
       log('error', `Failed to get task children: ${error.message}`);
@@ -683,15 +688,16 @@ export class TaskManager {
    */
   async getTaskParent(taskId) {
     try {
-      await this.sync.ensureSynced();
-      
+      // Medium priority sync: hierarchy queries
+      await this.sync.smartSync('medium');
+
       const result = await this.graph.getParent(taskId);
       if (!result) return null;
-      
+
       return {
         ...result.parent,
         decomposed_at: result.decomposed_at,
-        decomposition_type: result.decomposition_type
+        decomposition_type: result.decomposition_type,
       };
     } catch (error) {
       log('error', `Failed to get task parent: ${error.message}`);

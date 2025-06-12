@@ -34,9 +34,9 @@ describe('Error Recovery Integration Tests', () => {
         id: 'test-task',
         title: 'Test Task',
         status: 'pending',
-        priority: 'medium'
+        priority: 'medium',
       };
-      
+
       const filePath = await fileStorage.createTaskFile(task);
       expect(filePath).toBeTruthy();
 
@@ -59,12 +59,12 @@ describe('Error Recovery Integration Tests', () => {
       const task = {
         id: 'done-task',
         title: 'Completed Task',
-        status: 'done'
+        status: 'done',
       };
 
       // FileStorage should recreate the directory
       await expect(fileStorage.createTaskFile(task)).rejects.toThrow(/ENOENT/);
-      
+
       // The current implementation doesn't auto-create missing directories
       // This is actually a bug we could fix, but for now we test actual behavior
     });
@@ -74,15 +74,17 @@ describe('Error Recovery Integration Tests', () => {
       const task = {
         id: 'concurrent-test',
         title: 'Concurrent Test',
-        status: 'pending'
+        status: 'pending',
       };
-      
+
       await fileStorage.createTaskFile(task);
 
       // Simulate concurrent updates
-      const updates = Array(5).fill(null).map((_, i) => 
-        fileStorage.updateTaskStatus('concurrent-test', i % 2 === 0 ? 'in-progress' : 'pending')
-      );
+      const updates = Array(5)
+        .fill(null)
+        .map((_, i) =>
+          fileStorage.updateTaskStatus('concurrent-test', i % 2 === 0 ? 'in-progress' : 'pending')
+        );
 
       // The current implementation doesn't handle concurrent updates well
       // Multiple updates can cause race conditions
@@ -99,11 +101,11 @@ describe('Error Recovery Integration Tests', () => {
       const task = {
         id: 'permission-test',
         title: 'Permission Test',
-        status: 'pending'
+        status: 'pending',
       };
-      
+
       const filePath = await fileStorage.createTaskFile(task);
-      
+
       // Make file read-only
       await fs.chmod(filePath, 0o444);
 
@@ -138,19 +140,19 @@ describe('Error Recovery Integration Tests', () => {
         dependencies: ['dep1', 'dep2'],
         subtasks: [
           { title: 'Subtask 1', is_complete: false },
-          { title: 'Subtask 2', is_complete: true }
+          { title: 'Subtask 2', is_complete: true },
         ],
         notes: [
           { timestamp: '2025-06-11T12:00:00Z', content: 'Note 1' },
-          { timestamp: '2025-06-11T13:00:00Z', content: 'Note 2' }
-        ]
+          { timestamp: '2025-06-11T13:00:00Z', content: 'Note 2' },
+        ],
       };
 
       const filePath = await fileStorage.createTaskFile(task);
 
       // Read the file content
       const content = await fs.readFile(filePath, 'utf8');
-      
+
       // Corrupt part of it (remove some lines)
       const lines = content.split('\n');
       const corruptedContent = lines.slice(0, Math.floor(lines.length / 2)).join('\n');
@@ -158,7 +160,7 @@ describe('Error Recovery Integration Tests', () => {
 
       // Try to read - should get partial data or null
       const result = await fileStorage.readTaskFile('integrity-test');
-      
+
       // The behavior depends on implementation
       if (result) {
         // If it returns partial data, verify what we can
@@ -175,14 +177,14 @@ describe('Error Recovery Integration Tests', () => {
         id: 'circular-1',
         title: 'Circular Task 1',
         status: 'pending',
-        dependencies: ['circular-2'] // References task 2
+        dependencies: ['circular-2'], // References task 2
       };
 
       const task2 = {
-        id: 'circular-2', 
+        id: 'circular-2',
         title: 'Circular Task 2',
         status: 'pending',
-        dependencies: ['circular-1'] // References task 1
+        dependencies: ['circular-1'], // References task 1
       };
 
       // Should be able to create both
@@ -208,17 +210,19 @@ describe('Error Recovery Integration Tests', () => {
   describe('Recovery from Extreme Conditions', () => {
     test('should handle very large task files', async () => {
       // Create task with very large content
-      const hugeNotes = Array(1000).fill(null).map((_, i) => ({
-        timestamp: new Date().toISOString(),
-        content: `This is note ${i} with some content that makes the file larger`
-      }));
+      const hugeNotes = Array(1000)
+        .fill(null)
+        .map((_, i) => ({
+          timestamp: new Date().toISOString(),
+          content: `This is note ${i} with some content that makes the file larger`,
+        }));
 
       const task = {
         id: 'huge-task',
         title: 'Huge Task',
         status: 'pending',
         description: 'A'.repeat(10000), // 10KB description
-        notes: hugeNotes
+        notes: hugeNotes,
       };
 
       // Should handle large file
@@ -236,17 +240,17 @@ describe('Error Recovery Integration Tests', () => {
       const task = {
         id: 'rapid-change',
         title: 'Rapid Status Change',
-        status: 'pending'
+        status: 'pending',
       };
 
       await fileStorage.createTaskFile(task);
 
       // Rapid status changes
       const statuses = ['in-progress', 'done', 'pending', 'in-progress', 'done'];
-      
+
       for (const status of statuses) {
         await fileStorage.updateTaskStatus('rapid-change', status);
-        
+
         // Verify file moved correctly
         const retrieved = await fileStorage.readTaskFile('rapid-change');
         expect(retrieved.status).toBe(status);
@@ -259,7 +263,7 @@ describe('Error Recovery Integration Tests', () => {
       const task = {
         id: 'interrupt-test',
         title: 'Interrupt Test',
-        status: 'pending'
+        status: 'pending',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
@@ -267,10 +271,10 @@ describe('Error Recovery Integration Tests', () => {
       // Start moving file manually (simulating interrupted operation)
       const newPath = filePath.replace('/pending/', '/in-progress/');
       const newDir = path.dirname(newPath);
-      
+
       // Create directory but don't move file yet
       await fs.mkdir(newDir, { recursive: true });
-      
+
       // Now try to update normally - should handle the partial state
       await fileStorage.updateTaskStatus('interrupt-test', 'in-progress');
 

@@ -25,10 +25,10 @@ export class GraphConnection {
       // Initialize KuzuDB
       this.db = new kuzu.Database(this.dbPath);
       this.connection = new kuzu.Connection(this.db);
-      
+
       // Create schema if not exists
       await this.createSchema();
-      
+
       log('info', 'KuzuDB connection established');
       return true;
     } catch (error) {
@@ -58,26 +58,23 @@ export class GraphConnection {
         has_children BOOLEAN,
         PRIMARY KEY(id)
       )`,
-      
+
       // Dependency relationship
       `CREATE REL TABLE DEPENDS_ON (
         FROM Task TO Task,
         created_at STRING
       )`,
-      
-      // Subtask relationship
-      `CREATE REL TABLE HAS_SUBTASK (
+
+      // Unified parent-child relationship
+      `CREATE REL TABLE PARENT_CHILD (
         FROM Task TO Task,
+        relationship_type STRING,
         position INT64,
-        is_complete BOOLEAN
-      )`,
-      
-      // Parent-child relationship for task decomposition
-      `CREATE REL TABLE IS_PARENT_OF (
-        FROM Task TO Task,
+        is_complete BOOLEAN,
+        created_at STRING,
         decomposed_at STRING,
         decomposition_type STRING
-      )`
+      )`,
     ];
 
     for (const schema of schemas) {
@@ -85,7 +82,10 @@ export class GraphConnection {
         await this.execute(schema);
       } catch (error) {
         // Ignore "already exists" errors
-        if (!error.message.includes('already exists') && !error.message.includes('Binder exception')) {
+        if (
+          !error.message.includes('already exists') &&
+          !error.message.includes('Binder exception')
+        ) {
           throw error;
         }
         log('debug', `Schema already exists, skipping: ${error.message}`);
@@ -102,9 +102,9 @@ export class GraphConnection {
     if (!this.connection) {
       throw new Error('Database not initialized');
     }
-    
+
     log('debug', `Executing query: ${query.substring(0, 100)}...`);
-    
+
     try {
       // Prepare the statement first
       const preparedStatement = await this.connection.prepare(query);
@@ -138,7 +138,7 @@ export class GraphConnection {
         has_children: $has_children
       })
     `;
-    
+
     return this.execute(query, {
       id: task.id,
       semantic_id: task.semantic_id || null,
@@ -151,7 +151,7 @@ export class GraphConnection {
       file_path: task.file_path,
       is_atomic: task.is_atomic !== undefined ? task.is_atomic : null,
       complexity_score: task.complexity_score || null,
-      has_children: task.has_children || false
+      has_children: task.has_children || false,
     });
   }
 
@@ -163,7 +163,7 @@ export class GraphConnection {
       MATCH (t:Task {id: $id})
       RETURN t
     `;
-    
+
     const result = await this.execute(query, { id: taskId });
     return result.length > 0 ? result[0].t : null;
   }
@@ -175,13 +175,13 @@ export class GraphConnection {
     const setClause = Object.keys(updates)
       .map(key => `t.${key} = $${key}`)
       .join(', ');
-    
+
     const now = new Date().toISOString();
     const query = `
       MATCH (t:Task {id: $id})
       SET ${setClause}, t.updated_at = $updated_at
     `;
-    
+
     return this.execute(query, { id: taskId, updated_at: now, ...updates });
   }
 
@@ -193,7 +193,7 @@ export class GraphConnection {
       MATCH (t1:Task {id: $fromId}), (t2:Task {id: $toId})
       CREATE (t1)-[:DEPENDS_ON]->(t2)
     `;
-    
+
     return this.execute(query, { fromId, toId });
   }
 
@@ -206,7 +206,7 @@ export class GraphConnection {
       RETURN dep.id as id, dep.title as title, dep.status as status
       ORDER BY dep.id
     `;
-    
+
     return this.execute(query, { id: taskId });
   }
 
@@ -219,7 +219,7 @@ export class GraphConnection {
       RETURN dependent.id as id, dependent.title as title, dependent.status as status
       ORDER BY dependent.id
     `;
-    
+
     return this.execute(query, { id: taskId });
   }
 
@@ -229,22 +229,24 @@ export class GraphConnection {
   async findNextTask() {
     // First check subtasks of in-progress tasks
     const subtaskQuery = `
-      MATCH (parent:Task {status: 'in-progress'})-[:HAS_SUBTASK]->(st:Task)
+      MATCH (parent:Task {status: 'in-progress'})-[rel:PARENT_CHILD]->(st:Task)
       WHERE st.status = 'pending'
       AND NOT EXISTS {
         MATCH (st)-[:DEPENDS_ON]->(dep:Task)
         WHERE dep.status <> 'done'
       }
       RETURN st
-      ORDER BY parent.priority DESC, st.created_at
+      ORDER BY parent.priority DESC, 
+               CASE WHEN rel.position IS NOT NULL THEN rel.position ELSE 999 END,
+               st.created_at
       LIMIT 1
     `;
-    
+
     let result = await this.execute(subtaskQuery);
     if (result.length > 0) {
       return result[0].st;
     }
-    
+
     // Then check top-level tasks
     const taskQuery = `
       MATCH (t:Task)
@@ -254,7 +256,7 @@ export class GraphConnection {
         WHERE dep.status <> 'done'
       }
       AND NOT EXISTS {
-        MATCH (parent:Task)-[:HAS_SUBTASK]->(t)
+        MATCH (parent:Task)-[:PARENT_CHILD]->(t)
       }
       RETURN t
       ORDER BY 
@@ -266,7 +268,7 @@ export class GraphConnection {
         t.created_at
       LIMIT 1
     `;
-    
+
     result = await this.execute(taskQuery);
     return result.length > 0 ? result[0].t : null;
   }
@@ -280,13 +282,13 @@ export class GraphConnection {
       MATCH (t1:Task)-[:DEPENDS_ON*]->(t1)
       RETURN DISTINCT t1.id as task_id
     `;
-    
+
     try {
       const results = await this.execute(query);
       // Return in expected format
       return results.map(r => ({
         task_id: r.task_id,
-        cycle: [r.task_id] // Simplified - just show the task involved
+        cycle: [r.task_id], // Simplified - just show the task involved
       }));
     } catch (error) {
       // If query fails, return empty array (no cycles)
@@ -296,30 +298,57 @@ export class GraphConnection {
   }
 
   /**
-   * Create parent-child relationship between tasks
+   * Create unified parent-child relationship
    */
-  async createParentChildRelationship(parentId, childId, decompositionType = 'automatic') {
+  async createUnifiedParentChildRelationship(parentId, childId, type, metadata = {}) {
     const now = new Date().toISOString();
+
+    // Prepare relationship properties based on type
+    const props = {
+      relationship_type: type,
+      created_at: now,
+    };
+
+    // Add type-specific properties
+    if (type === 'decomposition') {
+      props.decomposed_at = metadata.decomposed_at || now;
+      props.decomposition_type = metadata.decomposition_type || 'automatic';
+    } else if (type === 'subtask') {
+      props.position = metadata.position || 0;
+      props.is_complete = metadata.is_complete || false;
+    }
+
     const query = `
       MATCH (parent:Task {id: $parentId}), (child:Task {id: $childId})
-      CREATE (parent)-[r:IS_PARENT_OF {
+      CREATE (parent)-[r:PARENT_CHILD {
+        relationship_type: $relationship_type,
+        created_at: $created_at,
         decomposed_at: $decomposed_at,
-        decomposition_type: $decomposition_type
+        decomposition_type: $decomposition_type,
+        position: $position,
+        is_complete: $is_complete
       }]->(child)
     `;
-    
+
     await this.execute(query, {
       parentId,
       childId,
-      decomposed_at: now,
-      decomposition_type: decompositionType
+      relationship_type: props.relationship_type,
+      created_at: props.created_at,
+      decomposed_at: props.decomposed_at || null,
+      decomposition_type: props.decomposition_type || null,
+      position: props.position || null,
+      is_complete: props.is_complete || null,
     });
-    
+
     // Update parent to mark it as having children
-    await this.execute(`
+    await this.execute(
+      `
       MATCH (parent:Task {id: $parentId})
       SET parent.has_children = true
-    `, { parentId });
+    `,
+      { parentId }
+    );
   }
 
   /**
@@ -327,11 +356,18 @@ export class GraphConnection {
    */
   async getChildren(parentId) {
     const query = `
-      MATCH (parent:Task {id: $parentId})-[r:IS_PARENT_OF]->(child:Task)
-      RETURN child, r.decomposed_at as decomposed_at, r.decomposition_type as decomposition_type
-      ORDER BY r.decomposed_at
+      MATCH (parent:Task {id: $parentId})-[r:PARENT_CHILD]->(child:Task)
+      RETURN child, 
+             r.decomposed_at as decomposed_at, 
+             r.decomposition_type as decomposition_type,
+             r.relationship_type as relationship_type,
+             r.position as position,
+             r.is_complete as is_complete
+      ORDER BY 
+        CASE WHEN r.position IS NOT NULL THEN r.position ELSE 999 END,
+        r.created_at
     `;
-    
+
     return this.execute(query, { parentId });
   }
 
@@ -340,10 +376,13 @@ export class GraphConnection {
    */
   async getParent(childId) {
     const query = `
-      MATCH (parent:Task)-[r:IS_PARENT_OF]->(child:Task {id: $childId})
-      RETURN parent, r.decomposed_at as decomposed_at, r.decomposition_type as decomposition_type
+      MATCH (parent:Task)-[r:PARENT_CHILD]->(child:Task {id: $childId})
+      RETURN parent, 
+             r.decomposed_at as decomposed_at, 
+             r.decomposition_type as decomposition_type,
+             r.relationship_type as relationship_type
     `;
-    
+
     const result = await this.execute(query, { childId });
     return result.length > 0 ? result[0] : null;
   }
@@ -356,7 +395,7 @@ export class GraphConnection {
       MATCH (task:Task {id: $taskId})
       RETURN task.has_children as has_children
     `;
-    
+
     const result = await this.execute(query, { taskId });
     return result.length > 0 ? result[0].has_children : false;
   }
@@ -372,5 +411,3 @@ export class GraphConnection {
     }
   }
 }
-
-export default GraphConnection;

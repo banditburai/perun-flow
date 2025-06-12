@@ -2,7 +2,7 @@
 
 /**
  * Quick Start Example for Perun Flow
- * 
+ *
  * This example demonstrates basic task management operations:
  * 1. Creating tasks with dependencies
  * 2. Finding the next actionable task
@@ -38,18 +38,18 @@ async function main() {
   try {
     // 1. Create some tasks
     console.log('\n📝 Creating tasks...');
-    
+
     const apiTask = await taskManager.createTask({
       title: 'Build user authentication API',
       description: 'Implement JWT-based authentication endpoints',
-      priority: 'high'
+      priority: 'high',
     });
     console.log(`✅ Created: ${apiTask.id} - ${apiTask.title}`);
 
     const dbTask = await taskManager.createTask({
       title: 'Create user database schema',
       description: 'Design and implement user tables with proper indexes',
-      priority: 'high'
+      priority: 'high',
     });
     console.log(`✅ Created: ${dbTask.id} - ${dbTask.title}`);
 
@@ -57,7 +57,7 @@ async function main() {
       title: 'Build login form component',
       description: 'Create responsive login form with validation',
       priority: 'medium',
-      dependencies: [apiTask.id] // UI depends on API
+      dependencies: [apiTask.id], // UI depends on API
     });
     console.log(`✅ Created: ${uiTask.id} - ${uiTask.title}`);
 
@@ -112,7 +112,6 @@ async function main() {
     for (const task of allTasks) {
       console.log(`- ${task.id}: ${task.title} [${task.status}]`);
     }
-
   } catch (error) {
     console.error('❌ Error:', error.message);
   } finally {

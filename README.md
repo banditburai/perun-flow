@@ -7,48 +7,57 @@ Perun Flow brings structure and intelligence to development task management thro
 ## Why Perun Flow?
 
 ### 🧠 **Semantic Intelligence**
+
 - **Smart Stream Detection**: Automatically categorizes tasks (API, UI, TEST, DATA) based on content
 - **Phase-Based Progression**: Organizes tasks by dependency depth for logical workflow
 - **Meaningful IDs**: Human-readable identifiers like `API-2.01` and `UI-3.02` instead of random UUIDs
 
 ### 🕸️ **Advanced Dependency Management**
+
 - **Bidirectional Tracking**: See both what a task depends on and what depends on it
 - **Circular Detection**: Automatically identifies and prevents dependency loops
 - **Impact Analysis**: Understand how changes cascade through your project
 - **Blocking Detection**: Know exactly what's preventing a task from starting
 
 ### 🔄 **Dual Storage Architecture**
+
 - **Human-Readable Files**: Tasks stored as markdown files you can edit, search, and version control
 - **Graph Database**: KuzuDB provides lightning-fast dependency queries and relationship traversal
 - **Sync-on-Demand**: Intelligent synchronization only when needed, keeping both systems consistent
 
 ### 🤖 **AI-Native Design**
+
 - **MCP Protocol**: Native integration with Claude Code and other AI tools
 - **14 Specialized Tools**: From task creation to dependency analysis to Git integration
 - **Operation Journaling**: Complete audit trail of all task operations for AI context
 - **Branch-per-Task**: Optional Git integration with automatic commit tracking
+- **Task Decomposition**: Automatic breakdown of complex tasks into manageable subtasks
 
 ## Architecture Highlights
 
 ### Intelligent Task Organization
+
 ```
 API-1.01 → Build Authentication        (Phase 1: Foundation)
-API-1.02 → Add User Endpoints         (Phase 1: Foundation)  
+API-1.02 → Add User Endpoints         (Phase 1: Foundation)
 UI-2.01  → Create Login Component     (Phase 2: Depends on API-1.01)
 UI-2.02  → Build Dashboard           (Phase 2: Depends on API-1.02)
 TEST-3.01 → Integration Tests        (Phase 3: Depends on UI-2.01, UI-2.02)
 ```
 
 ### Sophisticated Dependency Resolution
+
 - **Next Task Detection**: Automatically finds the next actionable task with no blocking dependencies
 - **Dependency Graphs**: Visual representation of task relationships and impact analysis
 - **Smart Blocking**: Tasks remain blocked until ALL dependencies are complete
 
 ### Enterprise-Grade Reliability
+
 - **170+ Tests**: Comprehensive test suite covering unit, integration, and end-to-end scenarios
 - **Graceful Degradation**: System works even if graph database is unavailable
 - **Error Recovery**: Robust handling of file system and database edge cases
-- **Performance Optimized**: Lazy initialization and efficient caching strategies
+- **Performance Optimized**: Smart sync strategy with immediate writes and efficient change detection
+- **Pre-commit CI**: Automated code quality checks with ESLint, Prettier, and Husky
 
 ## Quick Start
 
@@ -73,6 +82,7 @@ Add to your Claude Code configuration:
 ```
 
 Then use natural language with Claude:
+
 - "Create a high-priority API task for user authentication"
 - "What's the next task I should work on?"
 - "Show me what depends on the login component task"
@@ -82,8 +92,12 @@ Then use natural language with Claude:
 
 ```javascript
 import { TaskManager } from './src/core/task-manager.js';
+import { FileStorage } from './src/storage/file-storage.js';
+import { GraphConnection } from './src/storage/graph-connection.js';
 
-const taskManager = new TaskManager(fileStorage, graphConnection, syncEngine);
+const fileStorage = new FileStorage('./tasks');
+const graphConnection = new GraphConnection('./tasks');
+const taskManager = new TaskManager(fileStorage, graphConnection);
 await taskManager.initialize();
 
 // Create intelligent task with auto-categorization
@@ -91,7 +105,7 @@ const task = await taskManager.createTask({
   title: 'Build user authentication API',
   description: 'JWT-based auth with refresh tokens',
   priority: 'high',
-  dependencies: ['DATA-1.01'] // Database schema task
+  dependencies: ['DATA-1.01'], // Database schema task
 });
 
 // Get next actionable task (no blocking dependencies)
@@ -103,20 +117,23 @@ const dependents = await taskManager.getDependents(task.id);
 
 ## Key Features
 
-| Feature | Description |
-|---------|-------------|
-| 🎯 **Semantic IDs** | `API-1.01`, `UI-2.03` - meaningful, hierarchical task identifiers |
-| 📊 **Dependency Graphs** | Bidirectional relationship tracking with cycle detection |
-| 🔄 **File + Graph Storage** | Human-readable markdown + high-performance graph queries |
-| 🤖 **MCP Integration** | 14 specialized tools for AI-assisted development |
-| 🌳 **Git Integration** | Branch-per-task workflow with commit tracking |
-| 📓 **Operation Journal** | Complete audit trail of all task operations |
-| ⚡ **Smart Sync** | Efficient file-to-graph synchronization |
-| 🔍 **Impact Analysis** | Understand task relationships and blocking chains |
+| Feature                     | Description                                                           |
+| --------------------------- | --------------------------------------------------------------------- |
+| 🎯 **Semantic IDs**         | `API-1.01`, `UI-2.03` - meaningful, hierarchical task identifiers     |
+| 📊 **Dependency Graphs**    | Bidirectional relationship tracking with cycle detection              |
+| 🔄 **File + Graph Storage** | Human-readable markdown + high-performance graph queries              |
+| 🤖 **MCP Integration**      | 14 specialized tools for AI-assisted development                      |
+| 🌳 **Git Integration**      | Branch-per-task workflow with commit tracking                         |
+| 📓 **Operation Journal**    | Complete audit trail of all task operations                           |
+| ⚡ **Smart Sync**           | Write-through sync with automatic external change detection           |
+| 🔍 **Impact Analysis**      | Understand task relationships and blocking chains                     |
+| 🧩 **Task Decomposition**   | Parent-child relationships with automatic subtask tracking            |
+| ✅ **Pre-commit CI**        | Code quality enforcement with ESLint, Prettier, and automated testing |
 
 ## MCP Tools Available
 
 ### Core Task Management
+
 - `create` - Create new development tasks with smart categorization
 - `list` - List and filter tasks by status, priority, or stream
 - `status` - Update task status with automatic file organization
@@ -124,11 +141,18 @@ const dependents = await taskManager.getDependents(task.id);
 - `note` - Add timestamped progress notes
 
 ### Dependency Intelligence
+
 - `deps` - Analyze task dependencies and blocking status
 - `dependents` - See what tasks would be impacted by changes
 - `graph` - Full bidirectional dependency visualization
 
+### Task Decomposition
+
+- `decompose` - Break down complex tasks into manageable subtasks
+- `hierarchy` - View parent-child task relationships
+
 ### Git Integration (Optional)
+
 - `start` - Begin task work (creates branch + initial commit)
 - `commit` - Commit progress with task context
 - `complete` - Finalize task with completion metadata
@@ -136,15 +160,40 @@ const dependents = await taskManager.getDependents(task.id);
 - `history` - View commit timeline for task
 - `merge` - Integrate completed work back to main branch
 
-## Testing
+## Development
+
+### Setup
+
+```bash
+git clone https://github.com/banditburai/perun-flow.git
+cd perun-flow
+npm install
+```
+
+### Code Quality
+
+Pre-commit hooks automatically run:
+
+- ESLint for code quality
+- Prettier for formatting
+- Tests for modified files
+
+```bash
+npm run lint          # Check code quality
+npm run lint:fix      # Fix linting issues
+npm run format        # Format all files
+npm run format:check  # Check formatting
+```
+
+### Testing
 
 Comprehensive test suite with 170+ tests:
 
 ```bash
 npm test                 # Full test suite
-npm run test:unit        # Unit tests (133 tests)
-npm run test:integration # Integration tests (28 tests)  
-npm run test:e2e         # End-to-end MCP tests (22 tests)
+npm run test:unit        # Unit tests
+npm run test:integration # Integration tests
+npm run test:e2e         # End-to-end MCP tests
 npm run test:coverage    # With coverage reporting
 ```
 
@@ -156,6 +205,7 @@ npm run test:coverage    # With coverage reporting
 - [API Reference](docs/api-reference.md) - Programmatic usage
 - [Configuration Guide](docs/configuration.md) - Setup and environment options
 - [Testing Guide](docs/testing.md) - Test patterns and best practices
+- [Contributing](CONTRIBUTING.md) - Development setup and guidelines
 
 ## Requirements
 
