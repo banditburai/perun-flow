@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Test coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Task data (user files)
+.tasks/
+tasks/
+.example-tasks/
+
+# Test artifacts
+/tmp/
+test-*.db
+test-tasks-*/
+*-test-tasks/
+
+# Journal files
+*.journal
+
+# KuzuDB files
+*.kz
+*.db
+kuzudb/
+
+.mcp.json

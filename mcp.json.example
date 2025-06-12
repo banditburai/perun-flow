@@ -1,0 +1,29 @@
+{
+  "mcpServers": {
+    "perun-flow": {
+      "command": "node",
+      "args": ["path/to/perun-flow/src/mcp/server.js"],
+      "env": {
+        "TASKS_DIR": "path/to/your/tasks/directory",
+        "LOG_LEVEL": "info"
+      }
+    },
+    "kuzu": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-v",
+        "path/to/your/tasks/directory/.graph.db:/database",
+        "-e",
+        "KUZU_READ_ONLY=true",
+        "--rm",
+        "-i",
+        "kuzudb/mcp-server"
+      ]
+    }
+  }
+}
+
+// Note: The kuzu server is optional - only needed if you want to run direct Cypher queries
+// on the graph database. It runs in read-only mode to avoid conflicts with perun-flow.
+// Perun Flow handles all task operations through its own MCP tools.

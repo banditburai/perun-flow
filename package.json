@@ -1,0 +1,53 @@
+{
+  "name": "perun-flow",
+  "version": "0.1.0",
+  "description": "Lightweight task management with graph-based dependency tracking for AI-assisted development",
+  "type": "module",
+  "main": "src/index.js",
+  "bin": {
+    "perun-flow": "src/mcp/server.js"
+  },
+  "scripts": {
+    "start": "node src/mcp/server.js",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
+    "test:unit": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/unit",
+    "test:integration": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/integration",
+    "test:e2e": "node --experimental-vm-modules node_modules/jest/bin/jest.js tests/e2e",
+    "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
+    "dev": "node --watch src/mcp/server.js"
+  },
+  "keywords": [
+    "task-management",
+    "dependency-tracking",
+    "kuzudb",
+    "graph-database",
+    "mcp",
+    "claude-code",
+    "ai-tools",
+    "workflow-automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/banditburai/perun-flow.git"
+  },
+  "bugs": {
+    "url": "https://github.com/banditburai/perun-flow/issues"
+  },
+  "homepage": "https://github.com/banditburai/perun-flow#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "kuzu": "0.10.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
