@@ -2,16 +2,18 @@ import crypto from 'crypto';
 import { log } from '../utils/logger.js';
 import { SyncEngine } from './sync-engine.js';
 import { SimpleJournal } from './journal.js';
+import { TaskDecompositionService } from './llm-service.js';
 
 /**
  * Core task management logic combining file storage and graph operations
  */
 export class TaskManager {
-  constructor(fileStorage, graphConnection) {
+  constructor(fileStorage, graphConnection, options = {}) {
     this.files = fileStorage;
     this.graph = graphConnection;
     this.sync = new SyncEngine(fileStorage, graphConnection);
     this.journal = new SimpleJournal(fileStorage.tasksDir);
+    this.decomposition = new TaskDecompositionService(options.decomposition);
   }
 
   /**
@@ -535,6 +537,164 @@ export class TaskManager {
       return { id: taskId, deleted: true };
     } catch (error) {
       log('error', `Failed to delete task: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Analyze task complexity and determine if it needs decomposition
+   * @param {string} taskId - Task ID to analyze
+   * @returns {Object} Analysis result with complexity score and recommendation
+   */
+  async analyzeTaskComplexity(taskId) {
+    try {
+      const task = await this.getTask(taskId);
+      if (!task) {
+        throw new Error(`Task ${taskId} not found`);
+      }
+
+      const analysis = this.decomposition.analyzeComplexity(task);
+      
+      // Update task in graph with complexity metadata
+      await this.graph.execute(`
+        MATCH (t:Task {id: $id})
+        SET t.complexity_score = $score, t.is_atomic = $isAtomic
+      `, {
+        id: taskId,
+        score: analysis.complexityScore,
+        isAtomic: analysis.isAtomic
+      });
+
+      log('info', `Analyzed complexity for task ${taskId}: ${analysis.complexityScore}`);
+      return analysis;
+    } catch (error) {
+      log('error', `Failed to analyze task complexity: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Decompose a complex task into subtasks
+   * @param {string} taskId - Parent task ID to decompose
+   * @param {Object} options - Decomposition options
+   * @returns {Object} Decomposition result with created subtasks
+   */
+  async decomposeTask(taskId, options = {}) {
+    try {
+      await this.sync.ensureSynced();
+      
+      const parentTask = await this.getTask(taskId);
+      if (!parentTask) {
+        throw new Error(`Task ${taskId} not found`);
+      }
+
+      // Check if already has children
+      const hasChildren = await this.graph.hasChildren(taskId);
+      if (hasChildren) {
+        throw new Error(`Task ${taskId} already has subtasks`);
+      }
+
+      // Analyze complexity first
+      const analysis = await this.analyzeTaskComplexity(taskId);
+      if (!analysis.needsDecomposition && !options.force) {
+        return {
+          decomposed: false,
+          reason: 'Task does not need decomposition',
+          analysis,
+          subtasks: []
+        };
+      }
+
+      // Generate subtasks
+      const subtaskSpecs = this.decomposition.decomposeTask(parentTask, options);
+      const createdSubtasks = [];
+
+      // Create each subtask
+      for (const spec of subtaskSpecs) {
+        const subtask = await this.createTask({
+          title: spec.title,
+          description: spec.description,
+          priority: spec.priority || parentTask.priority,
+          dependencies: [] // Initially no dependencies between subtasks
+        });
+        
+        // Create parent-child relationship
+        await this.graph.createParentChildRelationship(
+          taskId, 
+          subtask.id, 
+          options.decompositionType || 'automatic'
+        );
+        
+        createdSubtasks.push(subtask);
+      }
+
+      // Mark parent as having children
+      await this.graph.execute(`
+        MATCH (t:Task {id: $id})
+        SET t.has_children = true
+      `, { id: taskId });
+
+      // Journal the decomposition
+      await this.journal.logOperation('task.decomposed', {
+        parent_task_id: taskId,
+        subtask_count: createdSubtasks.length,
+        decomposition_type: options.decompositionType || 'automatic'
+      });
+
+      log('info', `Decomposed task ${taskId} into ${createdSubtasks.length} subtasks`);
+
+      return {
+        decomposed: true,
+        parentTask,
+        subtasks: createdSubtasks,
+        analysis
+      };
+    } catch (error) {
+      log('error', `Failed to decompose task: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get task hierarchy (children) for a task
+   * @param {string} taskId - Parent task ID
+   * @returns {Array} Array of child tasks
+   */
+  async getTaskChildren(taskId) {
+    try {
+      await this.sync.ensureSynced();
+      
+      const children = await this.graph.getChildren(taskId);
+      return children.map(result => ({
+        ...result.child,
+        decomposed_at: result.decomposed_at,
+        decomposition_type: result.decomposition_type
+      }));
+    } catch (error) {
+      log('error', `Failed to get task children: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Get parent task for a subtask
+   * @param {string} taskId - Child task ID
+   * @returns {Object|null} Parent task or null if no parent
+   */
+  async getTaskParent(taskId) {
+    try {
+      await this.sync.ensureSynced();
+      
+      const result = await this.graph.getParent(taskId);
+      if (!result) return null;
+      
+      return {
+        ...result.parent,
+        decomposed_at: result.decomposed_at,
+        decomposition_type: result.decomposition_type
+      };
+    } catch (error) {
+      log('error', `Failed to get task parent: ${error.message}`);
       throw error;
     }
   }

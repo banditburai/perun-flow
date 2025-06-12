@@ -206,6 +206,32 @@ const tools = [
     }
   },
 
+  {
+    name: 'mcp__tasks__decompose',
+    description: 'Analyze task complexity and decompose into subtasks if needed',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to decompose' },
+        force: { type: 'boolean', default: false, description: 'Force decomposition even if not complex' },
+        max_subtasks: { type: 'number', default: 6, description: 'Maximum number of subtasks to create' }
+      },
+      required: ['task_id']
+    }
+  },
+
+  {
+    name: 'mcp__tasks__hierarchy',
+    description: 'Get task hierarchy (parent and children)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to get hierarchy for' }
+      },
+      required: ['task_id']
+    }
+  },
+
 ];
 
 /**
@@ -278,6 +304,12 @@ export function registerTaskTools(server, taskManager, syncEngine, serverInstanc
         
         case 'mcp__tasks__merge':
           return await handleMergeTask(args, taskManager);
+        
+        case 'mcp__tasks__decompose':
+          return await handleDecomposeTask(args, taskManager);
+        
+        case 'mcp__tasks__hierarchy':
+          return await handleGetHierarchy(args, taskManager);
         
         default:
           throw new McpError(
@@ -714,6 +746,102 @@ async function handleMergeTask(params, taskManager) {
     };
   } catch (error) {
     throw error;
+  }
+}
+
+/**
+ * Handle task decomposition
+ */
+async function handleDecomposeTask(params, taskManager) {
+  try {
+    const result = await taskManager.decomposeTask(params.task_id, {
+      force: params.force,
+      maxSubtasks: params.max_subtasks
+    });
+
+    if (!result.decomposed) {
+      return {
+        content: [{
+          type: 'text',
+          text: `Task ${params.task_id} was not decomposed: ${result.reason}\n\nComplexity Analysis:\nScore: ${result.analysis.complexityScore}\nReasoning: ${result.analysis.reasoning}`
+        }]
+      };
+    }
+
+    let response = `✅ Successfully decomposed task: ${result.parentTask.title}\n\n`;
+    response += `📊 Complexity Analysis:\n`;
+    response += `Score: ${result.analysis.complexityScore} (${result.analysis.reasoning})\n\n`;
+    response += `📝 Created ${result.subtasks.length} subtasks:\n`;
+    
+    result.subtasks.forEach((subtask, index) => {
+      response += `${index + 1}. ${subtask.id} - ${subtask.title}\n`;
+      response += `   Priority: ${subtask.priority}\n`;
+    });
+
+    return {
+      content: [{
+        type: 'text',
+        text: response
+      }]
+    };
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Failed to decompose task: ${error.message}`
+      }]
+    };
+  }
+}
+
+/**
+ * Handle getting task hierarchy
+ */
+async function handleGetHierarchy(params, taskManager) {
+  try {
+    const [parent, children] = await Promise.all([
+      taskManager.getTaskParent(params.task_id),
+      taskManager.getTaskChildren(params.task_id)
+    ]);
+
+    const task = await taskManager.getTask(params.task_id);
+    if (!task) {
+      throw new Error(`Task ${params.task_id} not found`);
+    }
+
+    let response = `📋 Task Hierarchy for: ${task.title}\n\n`;
+
+    if (parent) {
+      response += `📤 Parent Task:\n`;
+      response += `${parent.id} - ${parent.title} [${parent.status}]\n`;
+      response += `Decomposed: ${parent.decomposed_at}\n\n`;
+    } else {
+      response += `📤 Parent Task: None (this is a root task)\n\n`;
+    }
+
+    if (children.length > 0) {
+      response += `📥 Child Tasks (${children.length}):\n`;
+      children.forEach((child, index) => {
+        response += `${index + 1}. ${child.id} - ${child.title} [${child.status}]\n`;
+        response += `   Priority: ${child.priority}\n`;
+      });
+    } else {
+      response += `📥 Child Tasks: None (this is an atomic task)\n`;
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: response
+      }]
+    };
+  } catch (error) {
+    return {
+      content: [{
+        type: 'text',
+        text: `❌ Failed to get task hierarchy: ${error.message}`
+      }]
+    };
   }
 }
 

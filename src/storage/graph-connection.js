@@ -53,6 +53,9 @@ export class GraphConnection {
         created_at STRING,
         updated_at STRING,
         file_path STRING,
+        is_atomic BOOLEAN,
+        complexity_score DOUBLE,
+        has_children BOOLEAN,
         PRIMARY KEY(id)
       )`,
       
@@ -67,6 +70,13 @@ export class GraphConnection {
         FROM Task TO Task,
         position INT64,
         is_complete BOOLEAN
+      )`,
+      
+      // Parent-child relationship for task decomposition
+      `CREATE REL TABLE IS_PARENT_OF (
+        FROM Task TO Task,
+        decomposed_at STRING,
+        decomposition_type STRING
       )`
     ];
 
@@ -122,7 +132,10 @@ export class GraphConnection {
         priority: $priority,
         created_at: $created_at,
         updated_at: $updated_at,
-        file_path: $file_path
+        file_path: $file_path,
+        is_atomic: $is_atomic,
+        complexity_score: $complexity_score,
+        has_children: $has_children
       })
     `;
     
@@ -135,7 +148,10 @@ export class GraphConnection {
       priority: task.priority || 'medium',
       created_at: task.created_at || now,
       updated_at: now,
-      file_path: task.file_path
+      file_path: task.file_path,
+      is_atomic: task.is_atomic !== undefined ? task.is_atomic : null,
+      complexity_score: task.complexity_score || null,
+      has_children: task.has_children || false
     });
   }
 
@@ -277,6 +293,72 @@ export class GraphConnection {
       log('debug', 'Circular dependency check failed, assuming no cycles');
       return [];
     }
+  }
+
+  /**
+   * Create parent-child relationship between tasks
+   */
+  async createParentChildRelationship(parentId, childId, decompositionType = 'automatic') {
+    const now = new Date().toISOString();
+    const query = `
+      MATCH (parent:Task {id: $parentId}), (child:Task {id: $childId})
+      CREATE (parent)-[r:IS_PARENT_OF {
+        decomposed_at: $decomposed_at,
+        decomposition_type: $decomposition_type
+      }]->(child)
+    `;
+    
+    await this.execute(query, {
+      parentId,
+      childId,
+      decomposed_at: now,
+      decomposition_type: decompositionType
+    });
+    
+    // Update parent to mark it as having children
+    await this.execute(`
+      MATCH (parent:Task {id: $parentId})
+      SET parent.has_children = true
+    `, { parentId });
+  }
+
+  /**
+   * Get children of a task
+   */
+  async getChildren(parentId) {
+    const query = `
+      MATCH (parent:Task {id: $parentId})-[r:IS_PARENT_OF]->(child:Task)
+      RETURN child, r.decomposed_at as decomposed_at, r.decomposition_type as decomposition_type
+      ORDER BY r.decomposed_at
+    `;
+    
+    return this.execute(query, { parentId });
+  }
+
+  /**
+   * Get parent of a task
+   */
+  async getParent(childId) {
+    const query = `
+      MATCH (parent:Task)-[r:IS_PARENT_OF]->(child:Task {id: $childId})
+      RETURN parent, r.decomposed_at as decomposed_at, r.decomposition_type as decomposition_type
+    `;
+    
+    const result = await this.execute(query, { childId });
+    return result.length > 0 ? result[0] : null;
+  }
+
+  /**
+   * Check if task has children
+   */
+  async hasChildren(taskId) {
+    const query = `
+      MATCH (task:Task {id: $taskId})
+      RETURN task.has_children as has_children
+    `;
+    
+    const result = await this.execute(query, { taskId });
+    return result.length > 0 ? result[0].has_children : false;
   }
 
   /**
