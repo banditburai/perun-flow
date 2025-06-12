@@ -17,7 +17,7 @@ export class GraphConnection {
     this.initialized = false;
   }
 
-  async execute(query, params = {}) {
+  async execute(query, _params = {}) {
     return { table: [] };
   }
 
@@ -33,16 +33,16 @@ export class GraphConnection {
       subtasks: JSON.stringify(task.subtasks || []),
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      completed_at: task.completed_at || null
+      completed_at: task.completed_at || null,
     };
-    
+
     this.tasks.set(task.id, taskData);
-    
+
     // Store dependencies
     if (task.dependencies && task.dependencies.length > 0) {
       this.dependencies.set(task.id, task.dependencies);
     }
-    
+
     return taskData;
   }
 
@@ -51,21 +51,21 @@ export class GraphConnection {
     if (!task) {
       throw new Error('Task not found');
     }
-    
+
     Object.assign(task, updates);
     task.updated_at = new Date().toISOString();
-    
+
     return task;
   }
 
   async getTask(taskId) {
     const task = this.tasks.get(taskId);
     if (!task) return null;
-    
+
     return {
       ...task,
       notes: JSON.parse(task.notes),
-      subtasks: JSON.parse(task.subtasks)
+      subtasks: JSON.parse(task.subtasks),
     };
   }
 
@@ -73,7 +73,7 @@ export class GraphConnection {
     return Array.from(this.tasks.values()).map(task => ({
       ...task,
       notes: JSON.parse(task.notes),
-      subtasks: JSON.parse(task.subtasks)
+      subtasks: JSON.parse(task.subtasks),
     }));
   }
 
@@ -85,18 +85,18 @@ export class GraphConnection {
   async getTaskDependencies(taskId) {
     const deps = this.dependencies.get(taskId) || [];
     const dependencyTasks = [];
-    
+
     for (const depId of deps) {
       const depTask = this.tasks.get(depId);
       if (depTask) {
         dependencyTasks.push({
           ...depTask,
           notes: JSON.parse(depTask.notes),
-          subtasks: JSON.parse(depTask.subtasks)
+          subtasks: JSON.parse(depTask.subtasks),
         });
       }
     }
-    
+
     return dependencyTasks;
   }
 
@@ -107,7 +107,7 @@ export class GraphConnection {
 
   async getTaskDependents(taskId) {
     const dependents = [];
-    
+
     for (const [id, deps] of this.dependencies.entries()) {
       if (deps.includes(taskId)) {
         const task = this.tasks.get(id);
@@ -115,12 +115,12 @@ export class GraphConnection {
           dependents.push({
             ...task,
             notes: JSON.parse(task.notes),
-            subtasks: JSON.parse(task.subtasks)
+            subtasks: JSON.parse(task.subtasks),
           });
         }
       }
     }
-    
+
     return dependents;
   }
 
@@ -149,20 +149,20 @@ export class GraphConnection {
   async hasCircularDependency(taskId, dependencyId) {
     // Simple check - would dependencyId depend on taskId?
     const visited = new Set();
-    const checkDeps = (id) => {
+    const checkDeps = id => {
       if (visited.has(id)) return false;
       visited.add(id);
-      
+
       if (id === taskId) return true;
-      
+
       const deps = this.dependencies.get(id) || [];
       for (const depId of deps) {
         if (checkDeps(depId)) return true;
       }
-      
+
       return false;
     };
-    
+
     return checkDeps(dependencyId);
   }
 
@@ -175,11 +175,11 @@ export class GraphConnection {
     // Find tasks with no incomplete dependencies
     const allTasks = Array.from(this.tasks.values());
     const pendingTasks = allTasks.filter(task => task.status === 'pending');
-    
+
     for (const task of pendingTasks) {
       const deps = this.dependencies.get(task.id) || [];
       let canWork = true;
-      
+
       for (const depId of deps) {
         const depTask = this.tasks.get(depId);
         if (depTask && depTask.status !== 'done') {
@@ -187,16 +187,16 @@ export class GraphConnection {
           break;
         }
       }
-      
+
       if (canWork) {
         return {
           ...task,
           notes: JSON.parse(task.notes),
-          subtasks: JSON.parse(task.subtasks)
+          subtasks: JSON.parse(task.subtasks),
         };
       }
     }
-    
+
     return null;
   }
 
@@ -204,7 +204,7 @@ export class GraphConnection {
     const circles = [];
     const visited = new Set();
     const stack = new Set();
-    
+
     const hasCycle = (id, path = []) => {
       if (stack.has(id)) {
         // Found a cycle
@@ -212,29 +212,29 @@ export class GraphConnection {
         if (cycleStart !== -1) {
           circles.push({
             task_id: id,
-            cycle: path.slice(cycleStart).concat(id)
+            cycle: path.slice(cycleStart).concat(id),
           });
         }
         return true;
       }
       if (visited.has(id)) return false;
-      
+
       visited.add(id);
       stack.add(id);
       path.push(id);
-      
+
       const deps = this.dependencies.get(id) || [];
       for (const depId of deps) {
         if (hasCycle(depId, [...path])) {
           // Don't return true here, continue checking other paths
         }
       }
-      
+
       stack.delete(id);
       path.pop();
       return false;
     };
-    
+
     if (taskId) {
       hasCycle(taskId);
     } else {
@@ -245,7 +245,7 @@ export class GraphConnection {
         }
       }
     }
-    
+
     return circles;
   }
 }

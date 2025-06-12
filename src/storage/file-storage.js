@@ -18,12 +18,12 @@ export class FileStorage {
     try {
       // Create main tasks directory
       await fs.mkdir(this.tasksDir, { recursive: true });
-      
+
       // Create status subdirectories
       for (const dir of this.statusDirs) {
         await fs.mkdir(path.join(this.tasksDir, dir), { recursive: true });
       }
-      
+
       log('info', 'File storage initialized');
       return true;
     } catch (error) {
@@ -38,13 +38,13 @@ export class FileStorage {
   generateFilename(task) {
     // If semantic ID exists, use it as prefix
     const prefix = task.semantic_id || task.id;
-    
+
     const sanitized = task.title
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .substring(0, 50);
-    
+
     // Format: STREAM-PHASE.SEQ-id-title.md
     // Example: SYNC-1.01-mbs123-implement-sync-system.md
     return `${prefix}-${task.id}-${sanitized}.md`;
@@ -55,7 +55,7 @@ export class FileStorage {
    */
   async generateTaskContent(task) {
     let content = `# ${task.title}\n\n`;
-    
+
     // Metadata section
     content += `**ID:** ${task.id}\n`;
     if (task.semantic_id) {
@@ -64,14 +64,17 @@ export class FileStorage {
     content += `**Status:** ${task.status}\n`;
     content += `**Priority:** ${task.priority}\n`;
     content += `**Created:** ${task.created_at || new Date().toISOString()}\n`;
-    
-    
+
+    if (task.parent_id) {
+      content += `**Parent:** ${task.parent_id}\n`;
+    }
+
     content += '\n';
-    
+
     // Description
     content += '## Description\n';
     content += `${task.description || 'No description provided.'}\n\n`;
-    
+
     // Subtasks/Checklist
     if (task.subtasks && task.subtasks.length > 0) {
       content += '## Tasks\n';
@@ -81,11 +84,11 @@ export class FileStorage {
       }
       content += '\n';
     }
-    
+
     // Dependencies with clickable links
     if (task.dependencies && task.dependencies.length > 0) {
       content += '## Dependencies\n';
-      
+
       for (const dep of task.dependencies) {
         try {
           // Try to find the dependency file
@@ -95,15 +98,16 @@ export class FileStorage {
             const currentTaskPath = path.join(this.tasksDir, task.status || 'pending', 'dummy.md');
             const fromDir = path.dirname(currentTaskPath);
             const relativePath = path.relative(fromDir, depTask.file_path);
-            
+
             // Status emoji
-            const statusEmoji = {
-              'done': '✅',
-              'in-progress': '🚧',
-              'pending': '⏳',
-              'archive': '📦'
-            }[depTask.status] || '❓';
-            
+            const statusEmoji =
+              {
+                done: '✅',
+                'in-progress': '🚧',
+                pending: '⏳',
+                archive: '📦',
+              }[depTask.status] || '❓';
+
             // Generate clickable link with proper escaping for spaces
             const escapedPath = relativePath.replace(/ /g, '%20');
             content += `- [${dep.id} - ${depTask.title}](${escapedPath}) ${statusEmoji}\n`;
@@ -118,7 +122,7 @@ export class FileStorage {
       }
       content += '\n';
     }
-    
+
     // Files
     if (task.files && task.files.length > 0) {
       content += '## Files\n';
@@ -127,12 +131,12 @@ export class FileStorage {
       }
       content += '\n';
     }
-    
+
     // Dependents section (what depends on this task) - NEW!
     if (task.dependents && task.dependents.length > 0) {
       content += '## Dependents\n';
       content += '_Tasks that depend on this task:_\n';
-      
+
       for (const dependent of task.dependents) {
         try {
           // Try to find the dependent file
@@ -142,15 +146,16 @@ export class FileStorage {
             const currentTaskPath = path.join(this.tasksDir, task.status || 'pending', 'dummy.md');
             const fromDir = path.dirname(currentTaskPath);
             const relativePath = path.relative(fromDir, depTask.file_path);
-            
+
             // Status emoji
-            const statusEmoji = {
-              'done': '✅',
-              'in-progress': '🚧',
-              'pending': '⏳',
-              'archive': '📦'
-            }[depTask.status] || '❓';
-            
+            const statusEmoji =
+              {
+                done: '✅',
+                'in-progress': '🚧',
+                pending: '⏳',
+                archive: '📦',
+              }[depTask.status] || '❓';
+
             // Generate clickable link with proper escaping for spaces
             const escapedPath = relativePath.replace(/ /g, '%20');
             content += `- [${dependent.id} - ${depTask.title}](${escapedPath}) ${statusEmoji}\n`;
@@ -165,7 +170,7 @@ export class FileStorage {
       }
       content += '\n';
     }
-    
+
     // Notes section
     content += '## Notes\n';
     if (task.notes && task.notes.length > 0) {
@@ -173,33 +178,33 @@ export class FileStorage {
         content += `### ${note.timestamp}\n${note.content}\n\n`;
       }
     }
-    
+
     return content;
   }
 
   /**
    * Parse task content from markdown
    */
-  parseTaskContent(content, filename) {
+  parseTaskContent(content, _filename) {
     const lines = content.split('\n');
     const task = {
       subtasks: [],
       dependencies: [],
       files: [],
-      notes: []
+      notes: [],
     };
-    
+
     let currentSection = null;
     let noteTimestamp = null;
     let noteContent = [];
-    
+
     for (const line of lines) {
       // Title (H1)
       if (line.startsWith('# ')) {
         task.title = line.substring(2).trim();
         continue;
       }
-      
+
       // Metadata fields
       if (line.startsWith('**ID:** ')) {
         task.id = line.substring(8).trim();
@@ -211,8 +216,10 @@ export class FileStorage {
         task.priority = line.substring(14).trim();
       } else if (line.startsWith('**Created:** ')) {
         task.created_at = line.substring(13).trim();
+      } else if (line.startsWith('**Parent:** ')) {
+        task.parent_id = line.substring(12).trim();
       }
-      
+
       // Section headers
       if (line === '## Description') {
         currentSection = 'description';
@@ -230,7 +237,7 @@ export class FileStorage {
         if (noteTimestamp) {
           task.notes.push({
             timestamp: noteTimestamp,
-            content: noteContent.join('\n').trim()
+            content: noteContent.join('\n').trim(),
           });
         }
         noteTimestamp = line.substring(4).trim();
@@ -242,14 +249,14 @@ export class FileStorage {
         if (match) {
           task.subtasks.push({
             is_complete: match[1] === 'x',
-            title: match[2]
+            title: match[2],
           });
         }
       } else if (currentSection === 'dependencies' && line.startsWith('- ')) {
         // Handle both old and new formats
         // New format: - [id - title](path) emoji
         // Old format: - id [status]
-        
+
         // Try new format first
         const newMatch = line.match(/- \[([^\s]+) - ([^\]]+)\]\([^)]+\)\s*(.+)/);
         if (newMatch) {
@@ -258,12 +265,12 @@ export class FileStorage {
             '🚧': 'in-progress',
             '⏳': 'pending',
             '📦': 'archive',
-            '❓': 'unknown'
+            '❓': 'unknown',
           };
           const emoji = newMatch[3].trim();
           task.dependencies.push({
             id: newMatch[1],
-            status: statusMap[emoji] || 'unknown'
+            status: statusMap[emoji] || 'unknown',
           });
         } else {
           // Try old format
@@ -271,7 +278,7 @@ export class FileStorage {
           if (oldMatch) {
             task.dependencies.push({
               id: oldMatch[1],
-              status: oldMatch[2]
+              status: oldMatch[2],
             });
           }
         }
@@ -281,20 +288,20 @@ export class FileStorage {
         noteContent.push(line);
       }
     }
-    
+
     // Save last note
     if (noteTimestamp) {
       task.notes.push({
         timestamp: noteTimestamp,
-        content: noteContent.join('\n').trim()
+        content: noteContent.join('\n').trim(),
       });
     }
-    
+
     // Clean up description
     if (task.description) {
       task.description = task.description.trim();
     }
-    
+
     return task;
   }
 
@@ -305,10 +312,10 @@ export class FileStorage {
     const filename = this.generateFilename(task);
     const filepath = path.join(this.tasksDir, task.status || 'pending', filename);
     const content = await this.generateTaskContent(task);
-    
+
     await fs.writeFile(filepath, content, 'utf8');
     log('info', `Created task file: ${filename}`);
-    
+
     return filepath;
   }
 
@@ -321,7 +328,7 @@ export class FileStorage {
       const files = await fs.readdir(path.join(this.tasksDir, dir));
       // Look for files that contain the task ID (could have semantic prefix)
       const taskFile = files.find(f => f.includes(`-${taskId}-`));
-      
+
       if (taskFile) {
         const filepath = path.join(this.tasksDir, dir, taskFile);
         const content = await fs.readFile(filepath, 'utf8');
@@ -331,7 +338,7 @@ export class FileStorage {
         return task;
       }
     }
-    
+
     return null;
   }
 
@@ -343,23 +350,23 @@ export class FileStorage {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
-    
+
     const oldPath = task.file_path;
     const filename = path.basename(oldPath);
     const newPath = path.join(this.tasksDir, newStatus, filename);
-    
+
     // Update status in content
     task.status = newStatus;
     const content = await this.generateTaskContent(task);
-    
+
     // Write to new location
     await fs.writeFile(newPath, content, 'utf8');
-    
+
     // Remove from old location
     await fs.unlink(oldPath);
-    
+
     log('info', `Moved task ${taskId} from ${task.status} to ${newStatus}`);
-    
+
     return newPath;
   }
 
@@ -371,17 +378,17 @@ export class FileStorage {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
-    
+
     // Add new note
     task.notes.push({
       timestamp: new Date().toISOString(),
-      content: noteContent
+      content: noteContent,
     });
-    
+
     // Rewrite file
     const content = await this.generateTaskContent(task);
     await fs.writeFile(task.file_path, content, 'utf8');
-    
+
     log('info', `Added note to task ${taskId}`);
   }
 
@@ -390,12 +397,12 @@ export class FileStorage {
    */
   async listAllTasks() {
     const tasks = [];
-    
+
     for (const status of this.statusDirs) {
       const dir = path.join(this.tasksDir, status);
       try {
         const files = await fs.readdir(dir);
-        
+
         for (const file of files) {
           if (file.endsWith('.md')) {
             const filepath = path.join(dir, file);
@@ -411,7 +418,7 @@ export class FileStorage {
         log('debug', `Skipping ${status} directory: ${error.message}`);
       }
     }
-    
+
     return tasks;
   }
 
@@ -423,7 +430,7 @@ export class FileStorage {
     if (!task) {
       throw new Error(`Task ${taskId} not found`);
     }
-    
+
     await fs.unlink(task.file_path);
     log('info', `Deleted task ${taskId}`);
   }

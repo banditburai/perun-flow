@@ -19,7 +19,7 @@ export class SimpleJournal {
     try {
       // Ensure tasks directory exists
       await fs.mkdir(this.tasksDir, { recursive: true });
-      
+
       // Check if journal exists
       try {
         await fs.access(this.journalPath);
@@ -44,13 +44,13 @@ export class SimpleJournal {
         timestamp: new Date().toISOString(),
         operation,
         details,
-        version: '1.0' // For future compatibility
+        version: '1.0', // For future compatibility
       };
-      
+
       // Append as JSONL (one JSON object per line)
       const line = JSON.stringify(entry) + '\n';
       await fs.appendFile(this.journalPath, line, 'utf8');
-      
+
       log('debug', `Journaled operation: ${operation}`);
     } catch (error) {
       // Don't throw - journaling failures shouldn't break operations
@@ -67,7 +67,7 @@ export class SimpleJournal {
       semantic_id: task.semantic_id,
       title: task.title,
       priority: task.priority,
-      dependencies: task.dependencies?.map(d => d.id) || []
+      dependencies: task.dependencies?.map(d => d.id) || [],
     });
   }
 
@@ -78,7 +78,7 @@ export class SimpleJournal {
     await this.logOperation('task.status_updated', {
       task_id: taskId,
       old_status: oldStatus,
-      new_status: newStatus
+      new_status: newStatus,
     });
   }
 
@@ -88,7 +88,7 @@ export class SimpleJournal {
   async logTaskDeleted(taskId, title) {
     await this.logOperation('task.deleted', {
       task_id: taskId,
-      title: title
+      title: title,
     });
   }
 
@@ -98,7 +98,7 @@ export class SimpleJournal {
   async logDependencyAdded(fromTaskId, toTaskId) {
     await this.logOperation('dependency.added', {
       from_task_id: fromTaskId,
-      to_task_id: toTaskId
+      to_task_id: toTaskId,
     });
   }
 
@@ -108,7 +108,7 @@ export class SimpleJournal {
   async logDependencyRemoved(fromTaskId, toTaskId) {
     await this.logOperation('dependency.removed', {
       from_task_id: fromTaskId,
-      to_task_id: toTaskId
+      to_task_id: toTaskId,
     });
   }
 
@@ -118,7 +118,7 @@ export class SimpleJournal {
   async logNoteAdded(taskId, notePreview) {
     await this.logOperation('note.added', {
       task_id: taskId,
-      preview: notePreview.substring(0, 100) + (notePreview.length > 100 ? '...' : '')
+      preview: notePreview.substring(0, 100) + (notePreview.length > 100 ? '...' : ''),
     });
   }
 
@@ -128,7 +128,7 @@ export class SimpleJournal {
   async logSubtasksAdded(parentTaskId, subtaskCount) {
     await this.logOperation('subtasks.added', {
       parent_task_id: parentTaskId,
-      count: subtaskCount
+      count: subtaskCount,
     });
   }
 
@@ -139,7 +139,7 @@ export class SimpleJournal {
     await this.logOperation('sync.performed', {
       status: result.status,
       changes: result.changes,
-      details: result.details
+      details: result.details,
     });
   }
 
@@ -149,11 +149,14 @@ export class SimpleJournal {
   async getRecentEntries(limit = 50) {
     try {
       const content = await fs.readFile(this.journalPath, 'utf8');
-      const lines = content.trim().split('\n').filter(line => line);
-      
+      const lines = content
+        .trim()
+        .split('\n')
+        .filter(line => line);
+
       // Get last N entries
       const recentLines = lines.slice(-limit);
-      
+
       // Parse each line
       const entries = [];
       for (const line of recentLines) {
@@ -163,7 +166,7 @@ export class SimpleJournal {
           log('warn', `Skipping malformed journal entry: ${line}`);
         }
       }
-      
+
       return entries.reverse(); // Most recent first
     } catch (error) {
       log('error', `Failed to read journal: ${error.message}`);
@@ -178,8 +181,11 @@ export class SimpleJournal {
     try {
       const stats = await fs.stat(this.journalPath);
       const content = await fs.readFile(this.journalPath, 'utf8');
-      const lines = content.trim().split('\n').filter(line => line);
-      
+      const lines = content
+        .trim()
+        .split('\n')
+        .filter(line => line);
+
       // Count operations by type
       const operationCounts = {};
       for (const line of lines) {
@@ -190,14 +196,14 @@ export class SimpleJournal {
           // Skip malformed entries
         }
       }
-      
+
       return {
         size_bytes: stats.size,
         size_mb: (stats.size / 1024 / 1024).toFixed(2),
         entry_count: lines.length,
         created_at: stats.birthtime,
         modified_at: stats.mtime,
-        operations: operationCounts
+        operations: operationCounts,
       };
     } catch (error) {
       log('error', `Failed to get journal stats: ${error.message}`);
@@ -211,27 +217,30 @@ export class SimpleJournal {
   async query({ operation, taskId, startDate, endDate, limit = 100 }) {
     try {
       const content = await fs.readFile(this.journalPath, 'utf8');
-      const lines = content.trim().split('\n').filter(line => line);
-      
+      const lines = content
+        .trim()
+        .split('\n')
+        .filter(line => line);
+
       const results = [];
       for (const line of lines) {
         try {
           const entry = JSON.parse(line);
-          
+
           // Apply filters
           if (operation && entry.operation !== operation) continue;
           if (taskId && entry.details.task_id !== taskId) continue;
           if (startDate && new Date(entry.timestamp) < new Date(startDate)) continue;
           if (endDate && new Date(entry.timestamp) > new Date(endDate)) continue;
-          
+
           results.push(entry);
-          
+
           if (results.length >= limit) break;
         } catch {
           // Skip malformed entries
         }
       }
-      
+
       return results.reverse(); // Most recent first
     } catch (error) {
       log('error', `Failed to query journal: ${error.message}`);
@@ -245,21 +254,17 @@ export class SimpleJournal {
   async export(format = 'json') {
     try {
       const entries = await this.getRecentEntries(Number.MAX_SAFE_INTEGER);
-      
+
       if (format === 'json') {
         return JSON.stringify(entries, null, 2);
       } else if (format === 'csv') {
         // Simple CSV export
         const headers = ['timestamp', 'operation', 'details'];
-        const rows = entries.map(e => [
-          e.timestamp,
-          e.operation,
-          JSON.stringify(e.details)
-        ]);
-        
+        const rows = entries.map(e => [e.timestamp, e.operation, JSON.stringify(e.details)]);
+
         return [headers, ...rows].map(row => row.join(',')).join('\n');
       }
-      
+
       throw new Error(`Unsupported export format: ${format}`);
     } catch (error) {
       log('error', `Failed to export journal: ${error.message}`);
@@ -274,15 +279,15 @@ export class SimpleJournal {
     try {
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
       const archivePath = path.join(this.tasksDir, `.journal-${timestamp}.jsonl`);
-      
+
       // Move current journal to archive
       await fs.rename(this.journalPath, archivePath);
-      
+
       // Create new empty journal
       await fs.writeFile(this.journalPath, '', 'utf8');
-      
+
       log('info', `Rotated journal to ${archivePath}`);
-      
+
       return archivePath;
     } catch (error) {
       log('error', `Failed to rotate journal: ${error.message}`);

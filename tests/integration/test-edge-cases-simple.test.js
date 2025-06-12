@@ -32,7 +32,7 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         title: '🚀 Deploy to production 🎉',
         description: 'Deploy the app with ✨ sparkles ✨',
         status: 'pending',
-        priority: 'high'
+        priority: 'high',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
@@ -49,16 +49,16 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         { id: 'japanese', title: '日本語のタスク' },
         { id: 'russian', title: 'Задача на русском языке' },
         { id: 'chinese', title: '中文任务测试' },
-        { id: 'arabic', title: 'مهمة باللغة العربية' }
+        { id: 'arabic', title: 'مهمة باللغة العربية' },
       ];
 
       for (const task of unicodeTasks) {
         const filePath = await fileStorage.createTaskFile({
           ...task,
-          status: 'pending'
+          status: 'pending',
         });
         expect(filePath).toBeTruthy();
-        
+
         const retrieved = await fileStorage.readTaskFile(task.id);
         expect(retrieved.title).toBe(task.title);
       }
@@ -70,21 +70,21 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         id: 'dangerous-task',
         title: dangerousTitle,
         status: 'pending',
-        priority: 'high'
+        priority: 'high',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
       expect(filePath).toBeTruthy();
-      
+
       // Check that the file was created with a safe name
       const filename = path.basename(filePath);
-      
+
       // Should not contain path traversal or script tags in filename
       expect(filename).not.toContain('..');
       expect(filename).not.toContain('/');
       expect(filename).not.toContain('<');
       expect(filename).not.toContain('>');
-      
+
       // But content should preserve the original title
       const retrieved = await fileStorage.readTaskFile('dangerous-task');
       expect(retrieved.title).toBe(dangerousTitle);
@@ -98,16 +98,16 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         id: 'long-title',
         title: longTitle,
         status: 'pending',
-        priority: 'low'
+        priority: 'low',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
       expect(filePath).toBeTruthy();
-      
+
       // Filename should be truncated but content preserved
       const filename = path.basename(filePath);
       expect(filename.length).toBeLessThan(300); // Reasonable filename length
-      
+
       const retrieved = await fileStorage.readTaskFile('long-title');
       expect(retrieved.title).toBe(longTitle);
     });
@@ -118,12 +118,12 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         id: 'huge-desc',
         title: 'Task with huge description',
         description: hugeDescription,
-        status: 'pending'
+        status: 'pending',
       };
 
       const filePath = await fileStorage.createTaskFile(task);
       expect(filePath).toBeTruthy();
-      
+
       const retrieved = await fileStorage.readTaskFile('huge-desc');
       // FileStorage may truncate or modify very large descriptions
       expect(retrieved.description).toBeTruthy();
@@ -131,21 +131,23 @@ describe('Edge Cases Integration Tests (Simple)', () => {
     });
 
     test('should handle tasks with many notes', async () => {
-      const manyNotes = Array(500).fill(null).map((_, i) => ({
-        timestamp: new Date(Date.now() - i * 1000).toISOString(),
-        content: `Note ${i}: Some content for testing`
-      }));
+      const manyNotes = Array(500)
+        .fill(null)
+        .map((_, i) => ({
+          timestamp: new Date(Date.now() - i * 1000).toISOString(),
+          content: `Note ${i}: Some content for testing`,
+        }));
 
       const task = {
         id: 'many-notes',
         title: 'Task with many notes',
         status: 'pending',
-        notes: manyNotes
+        notes: manyNotes,
       };
 
       const filePath = await fileStorage.createTaskFile(task);
       expect(filePath).toBeTruthy();
-      
+
       const retrieved = await fileStorage.readTaskFile('many-notes');
       expect(retrieved.notes).toHaveLength(500);
       expect(retrieved.notes[0].content).toContain('Note 0');
@@ -163,19 +165,19 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         '.hiddenfile',
         'file.with.dots',
         'file-with-dashes',
-        'file_with_underscores'
+        'file_with_underscores',
       ];
 
       for (const id of problematicIds) {
         const task = {
           id,
           title: `Task with ID: ${id}`,
-          status: 'pending'
+          status: 'pending',
         };
 
         const filePath = await fileStorage.createTaskFile(task);
         expect(filePath).toBeTruthy();
-        
+
         const retrieved = await fileStorage.readTaskFile(id);
         expect(retrieved).toBeTruthy();
         expect(retrieved.title).toBe(`Task with ID: ${id}`);
@@ -186,21 +188,21 @@ describe('Edge Cases Integration Tests (Simple)', () => {
       const task = {
         id: 'rapid-ops',
         title: 'Rapid operations test',
-        status: 'pending'
+        status: 'pending',
       };
 
       // Create
       await fileStorage.createTaskFile(task);
-      
+
       // Rapid read/write cycles
       for (let i = 0; i < 10; i++) {
         const current = await fileStorage.readTaskFile('rapid-ops');
         current.notes = current.notes || [];
         current.notes.push({
           timestamp: new Date().toISOString(),
-          content: `Rapid update ${i}`
+          content: `Rapid update ${i}`,
         });
-        
+
         // Update by recreating (simulating rapid changes)
         await fileStorage.createTaskFile(current);
       }
@@ -220,16 +222,14 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         created_at: '2025-06-11T12:34:56.789Z',
         dependencies: [
           { id: 'dep1', status: 'done' },
-          { id: 'dep2', status: 'pending' }
+          { id: 'dep2', status: 'pending' },
         ],
         subtasks: [
           { title: 'Subtask 1', is_complete: true },
-          { title: 'Subtask 2', is_complete: false }
+          { title: 'Subtask 2', is_complete: false },
         ],
-        notes: [
-          { timestamp: '2025-06-11T10:00:00Z', content: 'Note with\nnewlines\nand\ttabs' }
-        ],
-        custom_field: 'This should be preserved'
+        notes: [{ timestamp: '2025-06-11T10:00:00Z', content: 'Note with\nnewlines\nand\ttabs' }],
+        custom_field: 'This should be preserved',
       };
 
       await fileStorage.createTaskFile(task);
@@ -249,7 +249,7 @@ describe('Edge Cases Integration Tests (Simple)', () => {
       const minimal = {
         id: 'minimal',
         title: 'Minimal task',
-        status: 'pending'
+        status: 'pending',
       };
 
       await fileStorage.createTaskFile(minimal);
@@ -273,7 +273,7 @@ describe('Edge Cases Integration Tests (Simple)', () => {
         dependencies: [],
         subtasks: [],
         notes: [],
-        files: []
+        files: [],
       };
 
       await fileStorage.createTaskFile(task);
@@ -291,14 +291,14 @@ describe('Edge Cases Integration Tests (Simple)', () => {
       const task = {
         id: 'status-boundary',
         title: 'Status boundary test',
-        status: 'pending'
+        status: 'pending',
       };
 
       await fileStorage.createTaskFile(task);
 
       // Valid status transitions
       const validStatuses = ['pending', 'in-progress', 'done', 'archive'];
-      
+
       for (const status of validStatuses) {
         try {
           await fileStorage.updateTaskStatus('status-boundary', status);

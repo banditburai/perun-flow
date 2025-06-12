@@ -20,11 +20,13 @@ tests/
 ## Running Tests
 
 ### Run all tests:
+
 ```bash
 node tests/run-tests.js
 ```
 
 ### Run individual tests:
+
 ```bash
 # From the perun-flow directory
 node tests/integration/test-sync-on-demand.js
@@ -43,6 +45,7 @@ node tests/integration/test-journal.js
 ## MCP Server Tests
 
 The MCP server tests are in the root directory:
+
 - `test-mcp-tools.js` - Tests MCP tool functionality
 - `test-*-server.js` - Various server integration tests
 

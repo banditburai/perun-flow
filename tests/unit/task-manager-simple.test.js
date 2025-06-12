@@ -1,11 +1,11 @@
 import { jest, describe, beforeEach, test, expect } from '@jest/globals';
 import { TaskManager } from '../../src/core/task-manager.js';
-import { promises as fs } from 'fs';
-import path from 'path';
+// import { promises as fs } from 'fs';
+// import path from 'path';
 
 describe('TaskManager Unit Tests (Simple)', () => {
   let taskManager;
-  
+
   // Mock dependencies
   const mockFileStorage = {
     tasksDir: '/tmp/test-tasks',
@@ -13,28 +13,28 @@ describe('TaskManager Unit Tests (Simple)', () => {
     createTaskFile: jest.fn().mockResolvedValue('/tmp/test-tasks/pending/test.md'),
     readTaskFile: jest.fn().mockResolvedValue(null),
     listAllTasks: jest.fn().mockResolvedValue([]),
-    taskFileExists: jest.fn().mockResolvedValue(false)
+    taskFileExists: jest.fn().mockResolvedValue(false),
   };
-  
+
   const mockGraphConnection = {
     initialize: jest.fn().mockResolvedValue(true),
     createTask: jest.fn().mockResolvedValue(true),
     addDependency: jest.fn().mockResolvedValue(true),
-    getTask: jest.fn().mockResolvedValue(null)
+    getTask: jest.fn().mockResolvedValue(null),
   };
 
   beforeEach(() => {
     // Reset all mocks
     jest.clearAllMocks();
-    
+
     // Mock the imports that TaskManager will create
     jest.doMock('../../src/core/sync-engine.js', () => ({
       SyncEngine: jest.fn().mockImplementation(() => ({
         ensureSynced: jest.fn().mockResolvedValue({ changes: 0 }),
-        clearCache: jest.fn()
-      }))
+        clearCache: jest.fn(),
+      })),
     }));
-    
+
     jest.doMock('../../src/core/journal.js', () => ({
       SimpleJournal: jest.fn().mockImplementation(() => ({
         initialize: jest.fn().mockResolvedValue(true),
@@ -43,10 +43,10 @@ describe('TaskManager Unit Tests (Simple)', () => {
         logTaskStatusUpdated: jest.fn().mockResolvedValue(true),
         logNoteAdded: jest.fn().mockResolvedValue(true),
         logSubtasksAdded: jest.fn().mockResolvedValue(true),
-        logTaskDeleted: jest.fn().mockResolvedValue(true)
-      }))
+        logTaskDeleted: jest.fn().mockResolvedValue(true),
+      })),
     }));
-    
+
     // Create TaskManager with mocked dependencies
     taskManager = new TaskManager(mockFileStorage, mockGraphConnection);
   });
@@ -55,11 +55,11 @@ describe('TaskManager Unit Tests (Simple)', () => {
     test('should generate unique IDs with correct format', () => {
       const id1 = taskManager.generateTaskId('Test Task 1');
       const id2 = taskManager.generateTaskId('Test Task 2');
-      
+
       // Check format: timestamp-hash
       expect(id1).toMatch(/^[a-z0-9]+-[a-z0-9]{6}$/);
       expect(id2).toMatch(/^[a-z0-9]+-[a-z0-9]{6}$/);
-      
+
       // Should be different for different titles
       expect(id1).not.toBe(id2);
     });
@@ -67,11 +67,11 @@ describe('TaskManager Unit Tests (Simple)', () => {
     test('should generate same ID for same title', () => {
       const title = 'Same Task Title';
       const id1 = taskManager.generateTaskId(title);
-      
+
       // Wait a bit to ensure different timestamp
       setTimeout(() => {
         const id2 = taskManager.generateTaskId(title);
-        
+
         // Hash part should be the same
         const hash1 = id1.split('-')[1];
         const hash2 = id2.split('-')[1];
@@ -162,9 +162,9 @@ describe('TaskManager Unit Tests (Simple)', () => {
 
     test('should calculate phase from single dependency', async () => {
       mockFileStorage.readTaskFile.mockResolvedValueOnce({
-        semantic_id: 'API-2.03'
+        semantic_id: 'API-2.03',
       });
-      
+
       const phase = await taskManager.calculatePhase(['dep1']);
       expect(phase).toBe(3); // Max dependency phase (2) + 1
     });
@@ -174,7 +174,7 @@ describe('TaskManager Unit Tests (Simple)', () => {
         .mockResolvedValueOnce({ semantic_id: 'API-1.01' })
         .mockResolvedValueOnce({ semantic_id: 'AUTH-3.02' })
         .mockResolvedValueOnce({ semantic_id: 'DATA-2.05' });
-      
+
       const phase = await taskManager.calculatePhase(['dep1', 'dep2', 'dep3']);
       expect(phase).toBe(4); // Max dependency phase (3) + 1
     });
@@ -184,7 +184,7 @@ describe('TaskManager Unit Tests (Simple)', () => {
         .mockResolvedValueOnce({ semantic_id: 'API-2.01' })
         .mockRejectedValueOnce(new Error('File not found'))
         .mockResolvedValueOnce({ semantic_id: 'DATA-1.03' });
-      
+
       const phase = await taskManager.calculatePhase(['dep1', 'missing', 'dep3']);
       expect(phase).toBe(3); // Max found phase (2) + 1, ignoring errors
     });
@@ -194,7 +194,7 @@ describe('TaskManager Unit Tests (Simple)', () => {
         .mockResolvedValueOnce({ semantic_id: 'API-2.01' })
         .mockResolvedValueOnce({ id: 'old-task' }) // No semantic_id
         .mockResolvedValueOnce(null);
-      
+
       const phase = await taskManager.calculatePhase(['dep1', 'dep2', 'dep3']);
       expect(phase).toBe(3); // Max found phase (2) + 1
     });
@@ -204,7 +204,7 @@ describe('TaskManager Unit Tests (Simple)', () => {
         .mockResolvedValueOnce({ id: 'task1' })
         .mockResolvedValueOnce(null)
         .mockRejectedValueOnce(new Error('Not found'));
-      
+
       const phase = await taskManager.calculatePhase(['dep1', 'dep2', 'dep3']);
       expect(phase).toBe(1); // No semantic deps found, stay at 1
     });
@@ -213,7 +213,7 @@ describe('TaskManager Unit Tests (Simple)', () => {
   describe('getNextSequence', () => {
     test('should return 01 for first task in stream-phase', async () => {
       mockFileStorage.listAllTasks.mockResolvedValueOnce([]);
-      
+
       const sequence = await taskManager.getNextSequence('API', 1);
       expect(sequence).toBe('01');
     });
@@ -223,18 +223,16 @@ describe('TaskManager Unit Tests (Simple)', () => {
         { semantic_id: 'API-1.01' },
         { semantic_id: 'API-1.02' },
         { semantic_id: 'API-2.01' }, // Different phase
-        { semantic_id: 'AUTH-1.01' } // Different stream
+        { semantic_id: 'AUTH-1.01' }, // Different stream
       ]);
-      
+
       const sequence = await taskManager.getNextSequence('API', 1);
       expect(sequence).toBe('03');
     });
 
     test('should pad sequence with zero', async () => {
-      mockFileStorage.listAllTasks.mockResolvedValueOnce([
-        { semantic_id: 'TEST-3.09' }
-      ]);
-      
+      mockFileStorage.listAllTasks.mockResolvedValueOnce([{ semantic_id: 'TEST-3.09' }]);
+
       const sequence = await taskManager.getNextSequence('TEST', 3);
       expect(sequence).toBe('10');
     });
@@ -244,28 +242,24 @@ describe('TaskManager Unit Tests (Simple)', () => {
     test('should generate complete semantic ID', async () => {
       mockFileStorage.listAllTasks.mockResolvedValue([]);
       mockFileStorage.readTaskFile.mockResolvedValue(null);
-      
+
       const semanticId = await taskManager.generateSemanticId(
         'Create API endpoints',
         'REST API for user management',
         []
       );
-      
+
       expect(semanticId).toBe('API-1.01');
     });
 
     test('should increment sequence for existing tasks', async () => {
       mockFileStorage.listAllTasks.mockResolvedValue([
         { semantic_id: 'TEST-1.01' },
-        { semantic_id: 'TEST-1.02' }
+        { semantic_id: 'TEST-1.02' },
       ]);
-      
-      const semanticId = await taskManager.generateSemanticId(
-        'Write more tests',
-        '',
-        []
-      );
-      
+
+      const semanticId = await taskManager.generateSemanticId('Write more tests', '', []);
+
       expect(semanticId).toBe('TEST-1.03');
     });
   });
@@ -273,60 +267,57 @@ describe('TaskManager Unit Tests (Simple)', () => {
   describe('createTask', () => {
     test('should create task with all required fields', async () => {
       mockFileStorage.listAllTasks.mockResolvedValue([]);
-      
+
       const result = await taskManager.createTask({
         title: 'Test Task',
         description: 'Test description',
-        priority: 'high'
+        priority: 'high',
       });
-      
+
       expect(result).toMatchObject({
         id: expect.stringMatching(/^[a-z0-9]+-[a-z0-9]{6}$/),
         semantic_id: expect.stringMatching(/^TEST-1\.01$/), // 'Test' maps to TEST stream
         title: 'Test Task',
-        file_path: '/tmp/test-tasks/pending/test.md'
+        file_path: '/tmp/test-tasks/pending/test.md',
       });
-      
+
       expect(mockFileStorage.createTaskFile).toHaveBeenCalledWith(
         expect.objectContaining({
           title: 'Test Task',
           description: 'Test description',
           priority: 'high',
-          status: 'pending'
+          status: 'pending',
         })
       );
-      
+
       expect(mockGraphConnection.createTask).toHaveBeenCalled();
     });
 
     test('should handle dependencies correctly', async () => {
       mockFileStorage.listAllTasks.mockResolvedValue([]);
       mockFileStorage.readTaskFile.mockResolvedValue({
-        semantic_id: 'AUTH-1.01'
+        semantic_id: 'AUTH-1.01',
       });
-      
+
       const result = await taskManager.createTask({
         title: 'Create user API',
-        dependencies: ['auth-task-id']
+        dependencies: ['auth-task-id'],
       });
-      
+
       expect(result.semantic_id).toBe('API-2.01');
-      expect(mockGraphConnection.addDependency).toHaveBeenCalledWith(
-        result.id,
-        'auth-task-id'
-      );
+      expect(mockGraphConnection.addDependency).toHaveBeenCalledWith(result.id, 'auth-task-id');
     });
 
     test('should use default priority', async () => {
       mockFileStorage.listAllTasks.mockResolvedValue([]);
-      
+
       await taskManager.createTask({
-        title: 'Default Priority Task'
+        title: 'Default Priority Task',
       });
-      
+
       expect(mockFileStorage.createTaskFile).toHaveBeenCalledWith(
         expect.objectContaining({
-          priority: 'medium'
+          priority: 'medium',
         })
       );
     });
