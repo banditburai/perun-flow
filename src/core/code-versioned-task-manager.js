@@ -1,8 +1,11 @@
 import { TaskManager } from './task-manager.js';
 import { SimpleJournal } from './journal.js';
+import { ValidationGenerationService } from './validation-service.js';
 import { log } from '../utils/logger.js';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { promises as fs } from 'fs';
+import path from 'path';
 
 const execAsync = promisify(exec);
 
@@ -18,6 +21,7 @@ export class CodeVersionedTaskManager extends TaskManager {
     this.codeDir = options.codeDir || process.cwd();
     this.autoCommit = options.autoCommit !== false;
     this.journal = new SimpleJournal(fileStorage.tasksDir);
+    this.validationService = new ValidationGenerationService(options.validation || {});
   }
 
   /**
@@ -96,9 +100,9 @@ export class CodeVersionedTaskManager extends TaskManager {
   }
 
   /**
-   * Complete a task with final commit
+   * Complete a task with final commit and validation
    */
-  async completeTask(taskId, finalMessage = '') {
+  async completeTask(taskId, finalMessage = '', options = {}) {
     const task = await this.getTask(taskId);
     if (!task) throw new Error(`Task not found: ${taskId}`);
 
@@ -107,19 +111,84 @@ export class CodeVersionedTaskManager extends TaskManager {
     // Ensure we're on the right branch
     await this.switchToBranch(branchName);
 
-    // Final commit on task branch
+    // Get changed files and git diff for validation
+    const changedFiles = await this.getTaskChangedFiles(taskId);
+    const gitDiff = await this.getTaskDiff(taskId);
+
+    // Generate and execute validation suite if enabled
+    let validationResults = null;
+    let validationSuite = null;
+
+    if (options.skipValidation !== true && this.validationService) {
+      try {
+        log('info', `Generating validation suite for task ${taskId}`);
+        validationSuite = await this.validationService.generateTaskValidation(
+          task,
+          changedFiles,
+          gitDiff
+        );
+
+        // Save validation suite
+        await this.saveValidationSuite(taskId, validationSuite);
+
+        // Execute validation if requested (default: true)
+        if (options.executeValidation !== false) {
+          log('info', `Executing validation suite for task ${taskId}`);
+          validationResults = await this.validationService.executeValidation(
+            validationSuite,
+            options.validationOptions
+          );
+
+          // Fail completion if critical validations fail
+          if (validationResults.overallStatus === 'failed' && !options.ignoreValidationFailures) {
+            const failures = validationResults.results
+              .filter(r => r.status === 'failed')
+              .map(r => `${r.type}: ${r.error}`)
+              .join(', ');
+
+            throw new Error(`Task completion blocked by validation failures: ${failures}`);
+          }
+        }
+
+        log('info', `Validation suite generated and executed for task ${taskId}`);
+      } catch (error) {
+        log('error', `Validation failed for task ${taskId}: ${error.message}`);
+        if (!options.ignoreValidationErrors) {
+          throw error;
+        }
+        validationResults = {
+          overallStatus: 'error',
+          error: error.message,
+          skipped: true,
+        };
+      }
+    }
+
+    // Final commit with validation info
     const finalCommitMessage = finalMessage || `Complete task: ${task.title}`;
-    const commitHash = await this.commitCode(finalCommitMessage, taskId);
+    const commitMessage = this.buildCompletionCommitMessage(finalCommitMessage, validationResults);
+    const commitHash = await this.commitCode(commitMessage, taskId);
 
-    // Update task status
-    await this.updateTaskStatus(taskId, 'done');
+    // Update task status with validation evidence
+    await this.updateTaskStatusWithValidation(taskId, 'done', validationResults);
 
-    // Log completion
+    // Log completion with validation results
     await this.journal.logOperation('task_completed', {
       taskId,
       title: task.title,
       branch: branchName,
       finalCommit: commitHash,
+      validationResults: validationResults
+        ? {
+            status: validationResults.overallStatus,
+            testsRun: validationResults.results?.length || 0,
+            duration: this._calculateDuration(
+              validationResults.startTime,
+              validationResults.endTime
+            ),
+            evidence: validationResults.evidence?.length || 0,
+          }
+        : null,
     });
 
     return {
@@ -127,6 +196,8 @@ export class CodeVersionedTaskManager extends TaskManager {
       branch: branchName,
       finalCommit: commitHash,
       status: 'done',
+      validationResults,
+      validationSuite,
       message: `Task completed on branch: ${branchName}`,
     };
   }
@@ -359,5 +430,127 @@ export class CodeVersionedTaskManager extends TaskManager {
     } catch (error) {
       return false;
     }
+  }
+
+  // Validation-related helper methods
+
+  /**
+   * Get files changed in this task (compared to main branch)
+   */
+  async getTaskChangedFiles(taskId) {
+    try {
+      const branchName = this.getBranchName(taskId, '');
+      const files = await this.execGit(`diff --name-only main...${branchName}`);
+      return files.split('\n').filter(f => f.trim());
+    } catch (error) {
+      log('warn', `Could not get changed files for task ${taskId}: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Get git diff for this task (compared to main branch)
+   */
+  async getTaskDiff(taskId) {
+    try {
+      const branchName = this.getBranchName(taskId, '');
+      return await this.execGit(`diff main...${branchName}`);
+    } catch (error) {
+      log('warn', `Could not get diff for task ${taskId}: ${error.message}`);
+      return '';
+    }
+  }
+
+  /**
+   * Save validation suite to file system
+   */
+  async saveValidationSuite(taskId, validationSuite) {
+    const validationDir = path.join(this.codeDir, '.perun', 'validations');
+    await fs.mkdir(validationDir, { recursive: true });
+
+    // Save validation suite JSON
+    const validationFile = path.join(validationDir, `${taskId}.json`);
+    await fs.writeFile(validationFile, JSON.stringify(validationSuite, null, 2));
+
+    // Save executable scripts
+    for (const [type, script] of Object.entries(validationSuite.scripts)) {
+      if (script.script && typeof script.script === 'string') {
+        const scriptFile = path.join(validationDir, `${taskId}-${type}.sh`);
+        await fs.writeFile(scriptFile, script.script);
+        await fs.chmod(scriptFile, '755');
+      }
+    }
+
+    log('info', `Validation suite saved to ${validationFile}`);
+  }
+
+  /**
+   * Build completion commit message with validation info
+   */
+  buildCompletionCommitMessage(baseMessage, validationResults) {
+    let message = baseMessage;
+
+    if (validationResults) {
+      message += `\n\nValidation Results:`;
+      message += `\n- Status: ${validationResults.overallStatus}`;
+      if (validationResults.results) {
+        message += `\n- Tests: ${validationResults.results.length} executed`;
+        const passed = validationResults.results.filter(r => r.status === 'passed').length;
+        message += `\n- Passed: ${passed}/${validationResults.results.length}`;
+      }
+      if (validationResults.evidence) {
+        message += `\n- Evidence: ${validationResults.evidence.length} items`;
+      }
+    }
+
+    return message;
+  }
+
+  /**
+   * Update task status with validation evidence
+   */
+  async updateTaskStatusWithValidation(taskId, status, validationResults) {
+    // First update the normal task status
+    await this.updateTaskStatus(taskId, status);
+
+    // Then add validation evidence to the task file
+    if (validationResults && status === 'done') {
+      const task = await this.getTask(taskId);
+      task.validation = {
+        status: validationResults.overallStatus,
+        completedAt: new Date().toISOString(),
+        evidence: validationResults.evidence || [],
+        summary: this._createValidationSummary(validationResults),
+      };
+
+      // Save updated task
+      await this.fileStorage.saveTask(task);
+      await this.sync.syncToGraph(task);
+    }
+  }
+
+  /**
+   * Create validation summary for task record
+   */
+  _createValidationSummary(validationResults) {
+    if (!validationResults.results) return 'No validation results';
+
+    const summary = {
+      totalTests: validationResults.results.length,
+      passed: validationResults.results.filter(r => r.status === 'passed').length,
+      failed: validationResults.results.filter(r => r.status === 'failed').length,
+      errors: validationResults.results.filter(r => r.status === 'error').length,
+      types: validationResults.results.map(r => r.type),
+    };
+
+    return `${summary.passed}/${summary.totalTests} validations passed. Types: ${summary.types.join(', ')}`;
+  }
+
+  /**
+   * Calculate duration between timestamps
+   */
+  _calculateDuration(startTime, endTime) {
+    if (!startTime || !endTime) return 'N/A';
+    return new Date(endTime) - new Date(startTime);
   }
 }

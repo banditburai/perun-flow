@@ -163,6 +163,21 @@ const tools = [
       properties: {
         task_id: { type: 'string', description: 'Task ID to complete' },
         message: { type: 'string', description: 'Final commit message' },
+        skip_validation: {
+          type: 'boolean',
+          default: false,
+          description: 'Skip validation entirely',
+        },
+        ignore_failures: {
+          type: 'boolean',
+          default: false,
+          description: 'Complete task even if validation fails',
+        },
+        generate_only: {
+          type: 'boolean',
+          default: false,
+          description: 'Only generate validation, do not execute',
+        },
       },
       required: ['task_id'],
     },
@@ -235,6 +250,77 @@ const tools = [
       type: 'object',
       properties: {
         task_id: { type: 'string', description: 'Task ID to get hierarchy for' },
+      },
+      required: ['task_id'],
+    },
+  },
+
+  // Enhanced next task tool
+  {
+    name: 'mcp__tasks__next_smart',
+    description: 'Find next task with configurable selection strategy',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy: {
+          type: 'string',
+          enum: ['simple', 'smart', 'depth-first', 'breadth-first'],
+          default: 'smart',
+          description: 'Task selection strategy',
+        },
+        explain: {
+          type: 'boolean',
+          default: true,
+          description: 'Include explanation of why task was selected',
+        },
+        context_task_id: {
+          type: 'string',
+          description: 'Current or recent task ID for context-aware selection',
+        },
+      },
+    },
+  },
+
+  // Validation tools
+  {
+    name: 'mcp__tasks__validate',
+    description: 'Generate and execute validation suite for a task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID to validate' },
+        generate_only: {
+          type: 'boolean',
+          default: false,
+          description: 'Only generate validation, do not execute',
+        },
+        validation_types: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Specific validation types to run',
+        },
+        skip_validation: {
+          type: 'boolean',
+          default: false,
+          description: 'Skip validation entirely',
+        },
+        ignore_failures: {
+          type: 'boolean',
+          default: false,
+          description: 'Continue even if validation fails',
+        },
+      },
+      required: ['task_id'],
+    },
+  },
+
+  {
+    name: 'mcp__tasks__validation_results',
+    description: 'Get validation results for a task',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        task_id: { type: 'string', description: 'Task ID' },
       },
       required: ['task_id'],
     },
@@ -318,6 +404,17 @@ export function registerTaskTools(server, taskManager, syncEngine, serverInstanc
           case 'mcp__tasks__hierarchy':
             return await handleGetHierarchy(args, taskManager);
 
+          // Enhanced next task tool
+          case 'mcp__tasks__next_smart':
+            return await handleNextTask(args, taskManager);
+
+          // Validation tools
+          case 'mcp__tasks__validate':
+            return await handleValidateTask(args, taskManager);
+
+          case 'mcp__tasks__validation_results':
+            return await handleValidationResults(args, taskManager);
+
           default:
             throw new McpError(ErrorCode.InvalidParams, `Tool ${name} not found`);
         }
@@ -367,9 +464,16 @@ async function handleCreateTask(params, taskManager) {
 
 async function handleNextTask(params, taskManager) {
   try {
-    const nextTask = await taskManager.findNextTask();
+    // Support both simple and enhanced modes
+    const options = {
+      strategy: params.strategy || 'smart',
+      context: params.context || {},
+      explain: params.explain !== false, // Default to true for better UX
+    };
 
-    if (!nextTask) {
+    const result = await taskManager.findNextTaskWithReason(options);
+
+    if (!result.task) {
       // Check if there are blocked tasks
       const allTasks = await taskManager.listTasks({ status: 'pending' });
       const blockedCount = allTasks.length;
@@ -395,9 +499,20 @@ async function handleNextTask(params, taskManager) {
       }
     }
 
+    const nextTask = result.task;
     let taskInfo = `Next task: ${nextTask.id} - ${nextTask.title}\n`;
     taskInfo += `Status: ${nextTask.status}\n`;
     taskInfo += `Priority: ${nextTask.priority}\n`;
+
+    // Add parent task info if this is a subtask
+    if (result.parentTask) {
+      taskInfo += `\nPart of: ${result.parentTask.title}\n`;
+    }
+
+    // Add selection reason if explain is enabled
+    if (options.explain && result.reason) {
+      taskInfo += `\nWhy selected: ${result.reason}\n`;
+    }
 
     if (nextTask.description) {
       taskInfo += `\nDescription:\n${nextTask.description}\n`;
@@ -688,13 +803,38 @@ async function handleCompleteTask(params, taskManager) {
       throw new Error('Git operations not supported. Initialize with CodeVersionedTaskManager.');
     }
 
-    const result = await taskManager.completeTask(params.task_id, params.message);
+    // Support validation options
+    const options = {
+      skipValidation: params.skip_validation || false,
+      ignoreValidationFailures: params.ignore_failures || false,
+      executeValidation: !params.generate_only,
+    };
+
+    const result = await taskManager.completeTask(params.task_id, params.message, options);
+
+    let response = `${result.message}\n\nBranch: ${result.branch}\nFinal commit: ${result.finalCommit}\nStatus: ${result.status}`;
+
+    // Add validation results to response
+    if (result.validationResults) {
+      response += `\n\n🔍 Validation Results:`;
+      response += `\n- Status: ${result.validationResults.overallStatus}`;
+      if (result.validationResults.results) {
+        const passed = result.validationResults.results.filter(r => r.status === 'passed').length;
+        response += `\n- Tests: ${passed}/${result.validationResults.results.length} passed`;
+      }
+      if (result.validationResults.evidence) {
+        response += `\n- Evidence: ${result.validationResults.evidence.length} items collected`;
+      }
+      if (result.validationResults.error) {
+        response += `\n- Error: ${result.validationResults.error}`;
+      }
+    }
 
     return {
       content: [
         {
           type: 'text',
-          text: `${result.message}\n\nBranch: ${result.branch}\nFinal commit: ${result.finalCommit}\nStatus: ${result.status}`,
+          text: response,
         },
       ],
     };
@@ -896,6 +1036,140 @@ async function handleGetHierarchy(params, taskManager) {
         },
       ],
     };
+  }
+}
+
+// Validation tool handlers
+async function handleValidateTask(params, taskManager) {
+  try {
+    if (!taskManager.validationService) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: '⚠️ Validation service not available. Enable validation in CodeVersionedTaskManager.',
+          },
+        ],
+      };
+    }
+
+    const task = await taskManager.getTask(params.task_id);
+    if (!task) {
+      throw new Error(`Task not found: ${params.task_id}`);
+    }
+
+    // Get task changes
+    const changedFiles = await taskManager.getTaskChangedFiles(params.task_id);
+    const gitDiff = await taskManager.getTaskDiff(params.task_id);
+
+    // Generate validation suite
+    const validationSuite = await taskManager.validationService.generateTaskValidation(
+      task,
+      changedFiles,
+      gitDiff
+    );
+
+    let response = `🔍 Generated validation suite for task: ${task.title}\n\n`;
+    response += `📊 Validation Plan:\n`;
+    response += `- Task Type: ${validationSuite.validationPlan.taskType}\n`;
+    response += `- Risk Level: ${validationSuite.validationPlan.riskLevel}\n`;
+    response += `- Validation Types: ${validationSuite.validationPlan.validationTypes.join(', ')}\n`;
+    response += `- Changed Files: ${changedFiles.length}\n\n`;
+
+    // Execute validation if not generate-only
+    if (!params.generate_only) {
+      const results = await taskManager.validationService.executeValidation(validationSuite, {
+        types: params.validation_types,
+      });
+
+      response += `🏃 Execution Results:\n`;
+      response += `- Overall Status: ${results.overallStatus}\n`;
+      response += `- Tests Run: ${results.results.length}\n`;
+      response += `- Duration: ${results.endTime ? new Date(results.endTime) - new Date(results.startTime) : 'N/A'}ms\n\n`;
+
+      for (const result of results.results) {
+        const icon = result.status === 'passed' ? '✅' : result.status === 'failed' ? '❌' : '⚠️';
+        response += `${icon} ${result.type}: ${result.status} (${result.duration}ms)\n`;
+        if (result.error) {
+          response += `   Error: ${result.error}\n`;
+        }
+      }
+
+      // Show evidence
+      if (results.evidence && results.evidence.length > 0) {
+        response += `\n📋 Evidence Collected:\n`;
+        for (const evidence of results.evidence) {
+          response += `- ${evidence.type}: ${evidence.evidence}\n`;
+        }
+      }
+    }
+
+    // Save validation suite
+    await taskManager.saveValidationSuite(params.task_id, validationSuite);
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: response,
+        },
+      ],
+    };
+  } catch (error) {
+    throw error;
+  }
+}
+
+async function handleValidationResults(params, taskManager) {
+  try {
+    if (!taskManager.validationService) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: '⚠️ Validation service not available.',
+          },
+        ],
+      };
+    }
+
+    const task = await taskManager.getTask(params.task_id);
+    if (!task) {
+      throw new Error(`Task not found: ${params.task_id}`);
+    }
+
+    let response = `🔍 Validation Results for Task: ${task.title}\n\n`;
+
+    // Check if task has validation data
+    if (task.validation) {
+      response += `📊 Task Validation Summary:\n`;
+      response += `- Status: ${task.validation.status}\n`;
+      response += `- Completed: ${task.validation.completedAt}\n`;
+      response += `- Summary: ${task.validation.summary}\n\n`;
+
+      if (task.validation.evidence && task.validation.evidence.length > 0) {
+        response += `📋 Evidence:\n`;
+        for (const evidence of task.validation.evidence) {
+          response += `- ${evidence.type}: ${evidence.evidence} (${evidence.timestamp})\n`;
+        }
+      } else {
+        response += `📋 Evidence: No evidence recorded\n`;
+      }
+    } else {
+      response += `⚠️ No validation results found for this task.\n`;
+      response += `Run 'mcp__tasks__validate' to generate validation for this task.`;
+    }
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: response,
+        },
+      ],
+    };
+  } catch (error) {
+    throw error;
   }
 }
 

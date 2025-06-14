@@ -171,6 +171,22 @@ export class FileStorage {
       content += '\n';
     }
 
+    // Validation section
+    if (task.validation) {
+      content += '## Validation\n';
+      content += `**Status:** ${task.validation.status}\n`;
+      content += `**Completed:** ${task.validation.completedAt}\n`;
+      content += `**Summary:** ${task.validation.summary}\n\n`;
+
+      if (task.validation.evidence && task.validation.evidence.length > 0) {
+        content += '### Evidence\n';
+        for (const evidence of task.validation.evidence) {
+          content += `- **${evidence.type}:** ${evidence.evidence} _(${evidence.timestamp})_\n`;
+        }
+        content += '\n';
+      }
+    }
+
     // Notes section
     content += '## Notes\n';
     if (task.notes && task.notes.length > 0) {
@@ -220,6 +236,17 @@ export class FileStorage {
         task.parent_id = line.substring(12).trim();
       }
 
+      // Validation metadata fields (when in validation section)
+      if (currentSection === 'validation') {
+        if (line.startsWith('**Status:** ')) {
+          task.validation.status = line.substring(12).trim();
+        } else if (line.startsWith('**Completed:** ')) {
+          task.validation.completedAt = line.substring(15).trim();
+        } else if (line.startsWith('**Summary:** ')) {
+          task.validation.summary = line.substring(13).trim();
+        }
+      }
+
       // Section headers
       if (line === '## Description') {
         currentSection = 'description';
@@ -230,6 +257,11 @@ export class FileStorage {
         currentSection = 'dependencies';
       } else if (line === '## Files') {
         currentSection = 'files';
+      } else if (line === '## Validation') {
+        currentSection = 'validation';
+        task.validation = { evidence: [] };
+      } else if (line === '### Evidence' && currentSection === 'validation') {
+        currentSection = 'validation-evidence';
       } else if (line === '## Notes') {
         currentSection = 'notes';
       } else if (line.startsWith('### ') && currentSection === 'notes') {
@@ -284,6 +316,16 @@ export class FileStorage {
         }
       } else if (currentSection === 'files' && line.startsWith('- ')) {
         task.files.push(line.substring(2).trim());
+      } else if (currentSection === 'validation-evidence' && line.startsWith('- ')) {
+        // Parse evidence lines: - **type:** evidence _(timestamp)_
+        const evidenceMatch = line.match(/- \*\*([^:]+):\*\* (.+) _\(([^)]+)\)_/);
+        if (evidenceMatch) {
+          task.validation.evidence.push({
+            type: evidenceMatch[1],
+            evidence: evidenceMatch[2],
+            timestamp: evidenceMatch[3],
+          });
+        }
       } else if (currentSection === 'notes' && noteTimestamp && !line.startsWith('###')) {
         noteContent.push(line);
       }
@@ -390,6 +432,34 @@ export class FileStorage {
     await fs.writeFile(task.file_path, content, 'utf8');
 
     log('info', `Added note to task ${taskId}`);
+  }
+
+  /**
+   * Save an existing task with updated content
+   */
+  async saveTask(task) {
+    if (!task.id) {
+      throw new Error('Task must have an id');
+    }
+
+    // If we have a file path, use it. Otherwise, find the task first
+    let filePath = task.file_path;
+    if (!filePath) {
+      const existingTask = await this.readTaskFile(task.id);
+      if (!existingTask) {
+        throw new Error(`Task ${task.id} not found`);
+      }
+      filePath = existingTask.file_path;
+    }
+
+    // Generate updated content
+    const content = await this.generateTaskContent(task);
+
+    // Write updated content to the same file
+    await fs.writeFile(filePath, content, 'utf8');
+
+    log('info', `Updated task file: ${path.basename(filePath)}`);
+    return filePath;
   }
 
   /**

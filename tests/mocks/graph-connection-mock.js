@@ -6,6 +6,8 @@ export class GraphConnection {
     this.initialized = false;
     this.tasks = new Map();
     this.dependencies = new Map();
+    this.parentChild = new Map(); // parent_id -> [child_ids]
+    this.childParent = new Map(); // child_id -> parent_id
   }
 
   async initialize() {
@@ -18,7 +20,8 @@ export class GraphConnection {
   }
 
   async execute(query, _params = {}) {
-    return { table: [] };
+    // Return empty array to match what sync engine expects
+    return [];
   }
 
   async createTask(task) {
@@ -34,13 +37,37 @@ export class GraphConnection {
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       completed_at: task.completed_at || null,
+      parent_id: task.parent_id || null,
+      has_children: false,
     };
 
     this.tasks.set(task.id, taskData);
 
-    // Store dependencies
+    // Store dependencies (extract IDs if objects are passed)
     if (task.dependencies && task.dependencies.length > 0) {
-      this.dependencies.set(task.id, task.dependencies);
+      const depIds = task.dependencies.map(dep => {
+        if (typeof dep === 'string') return dep;
+        if (typeof dep === 'object' && dep.id) return dep.id;
+        return dep;
+      });
+      this.dependencies.set(task.id, depIds);
+    }
+
+    // Store parent-child relationships
+    if (task.parent_id) {
+      this.childParent.set(task.id, task.parent_id);
+
+      // Update parent's children list
+      if (!this.parentChild.has(task.parent_id)) {
+        this.parentChild.set(task.parent_id, []);
+      }
+      this.parentChild.get(task.parent_id).push(task.id);
+
+      // Mark parent as having children
+      const parent = this.tasks.get(task.parent_id);
+      if (parent) {
+        parent.has_children = true;
+      }
     }
 
     return taskData;
@@ -80,13 +107,40 @@ export class GraphConnection {
   async deleteTask(taskId) {
     this.tasks.delete(taskId);
     this.dependencies.delete(taskId);
+
+    // Clean up parent-child relationships
+    const parentId = this.childParent.get(taskId);
+    if (parentId) {
+      const siblings = this.parentChild.get(parentId) || [];
+      const index = siblings.indexOf(taskId);
+      if (index > -1) {
+        siblings.splice(index, 1);
+      }
+      // Update parent's has_children flag if no children left
+      if (siblings.length === 0) {
+        const parent = this.tasks.get(parentId);
+        if (parent) {
+          parent.has_children = false;
+        }
+      }
+    }
+
+    // Clean up children
+    const childIds = this.parentChild.get(taskId) || [];
+    for (const childId of childIds) {
+      this.childParent.delete(childId);
+    }
+    this.parentChild.delete(taskId);
+    this.childParent.delete(taskId);
   }
 
   async getTaskDependencies(taskId) {
     const deps = this.dependencies.get(taskId) || [];
     const dependencyTasks = [];
 
-    for (const depId of deps) {
+    for (const dep of deps) {
+      // Handle both string IDs and dependency objects
+      const depId = typeof dep === 'string' ? dep : dep.id;
       const depTask = this.tasks.get(depId);
       if (depTask) {
         dependencyTasks.push({
@@ -131,7 +185,14 @@ export class GraphConnection {
 
   async addDependency(taskId, dependencyId) {
     const deps = this.dependencies.get(taskId) || [];
-    if (!deps.includes(dependencyId)) {
+    // Check if dependency already exists (could be string or object with id)
+    const exists = deps.some(dep => {
+      if (typeof dep === 'string') return dep === dependencyId;
+      if (typeof dep === 'object' && dep.id) return dep.id === dependencyId;
+      return false;
+    });
+
+    if (!exists) {
       deps.push(dependencyId);
       this.dependencies.set(taskId, deps);
     }
@@ -169,26 +230,83 @@ export class GraphConnection {
   async clearDatabase() {
     this.tasks.clear();
     this.dependencies.clear();
+    this.parentChild.clear();
+    this.childParent.clear();
   }
 
   async findNextTask() {
-    // Find tasks with no incomplete dependencies
     const allTasks = Array.from(this.tasks.values());
     const pendingTasks = allTasks.filter(task => task.status === 'pending');
+    const inProgressTasks = allTasks.filter(task => task.status === 'in-progress');
 
-    for (const task of pendingTasks) {
-      const deps = this.dependencies.get(task.id) || [];
-      let canWork = true;
-
-      for (const depId of deps) {
+    // Helper to check if task has no incomplete dependencies
+    const hasNoBlockingDeps = taskId => {
+      const deps = this.dependencies.get(taskId) || [];
+      for (const dep of deps) {
+        // Handle both string IDs and dependency objects
+        const depId = typeof dep === 'string' ? dep : dep.id;
         const depTask = this.tasks.get(depId);
         if (depTask && depTask.status !== 'done') {
-          canWork = false;
-          break;
+          return false;
         }
       }
+      return true;
+    };
 
-      if (canWork) {
+    // Helper to check if task is a leaf (no children)
+    const isLeafTask = taskId => {
+      return !this.parentChild.has(taskId) || this.parentChild.get(taskId).length === 0;
+    };
+
+    // 1. First check for actionable subtasks of in-progress parent tasks
+    for (const parentTask of inProgressTasks) {
+      const childIds = this.parentChild.get(parentTask.id) || [];
+      for (const childId of childIds) {
+        const childTask = this.tasks.get(childId);
+        if (
+          childTask &&
+          childTask.status === 'pending' &&
+          hasNoBlockingDeps(childId) &&
+          isLeafTask(childId)
+        ) {
+          return {
+            ...childTask,
+            notes: JSON.parse(childTask.notes),
+            subtasks: JSON.parse(childTask.subtasks),
+          };
+        }
+      }
+    }
+
+    // 2. Check for actionable subtasks of decomposed pending parent tasks
+    for (const parentTask of pendingTasks) {
+      if (parentTask.has_children) {
+        const childIds = this.parentChild.get(parentTask.id) || [];
+        for (const childId of childIds) {
+          const childTask = this.tasks.get(childId);
+          if (
+            childTask &&
+            childTask.status === 'pending' &&
+            hasNoBlockingDeps(childId) &&
+            isLeafTask(childId)
+          ) {
+            return {
+              ...childTask,
+              notes: JSON.parse(childTask.notes),
+              subtasks: JSON.parse(childTask.subtasks),
+            };
+          }
+        }
+      }
+    }
+
+    // 3. Find top-level tasks without children
+    for (const task of pendingTasks) {
+      if (
+        !task.has_children &&
+        !this.childParent.has(task.id) && // Not a subtask
+        hasNoBlockingDeps(task.id)
+      ) {
         return {
           ...task,
           notes: JSON.parse(task.notes),
@@ -247,5 +365,74 @@ export class GraphConnection {
     }
 
     return circles;
+  }
+
+  async hasChildren(taskId) {
+    const children = this.parentChild.get(taskId) || [];
+    return children.length > 0;
+  }
+
+  async getChildren(taskId) {
+    const childIds = this.parentChild.get(taskId) || [];
+    const children = [];
+
+    for (const childId of childIds) {
+      const child = this.tasks.get(childId);
+      if (child) {
+        children.push({
+          child: {
+            ...child,
+            notes: JSON.parse(child.notes),
+            subtasks: JSON.parse(child.subtasks),
+          },
+          relationship_type: 'decomposition',
+          decomposition_type: 'automatic',
+          position: childIds.indexOf(childId),
+          is_complete: false,
+        });
+      }
+    }
+
+    return children;
+  }
+
+  async getParent(taskId) {
+    const parentId = this.childParent.get(taskId);
+    if (!parentId) return null;
+
+    const parent = this.tasks.get(parentId);
+    if (!parent) return null;
+
+    return {
+      parent: {
+        ...parent,
+        notes: JSON.parse(parent.notes),
+        subtasks: JSON.parse(parent.subtasks),
+      },
+      decomposed_at: parent.created_at,
+      decomposition_type: 'automatic',
+    };
+  }
+
+  async createUnifiedParentChildRelationship(parentId, childId, relationshipType, _metadata = {}) {
+    // Store the relationship
+    if (!this.parentChild.has(parentId)) {
+      this.parentChild.set(parentId, []);
+    }
+    this.parentChild.get(parentId).push(childId);
+    this.childParent.set(childId, parentId);
+
+    // Mark parent as having children
+    const parent = this.tasks.get(parentId);
+    if (parent) {
+      parent.has_children = true;
+    }
+
+    return true;
+  }
+
+  // Add missing method that SmartTaskSelector checks for
+  isExecuteSupported() {
+    return false; // Mock doesn't support complex execute queries
   }
 }

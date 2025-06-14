@@ -247,7 +247,36 @@ export class GraphConnection {
       return result[0].st;
     }
 
-    // Then check top-level tasks
+    // Check for actionable subtasks of decomposed pending tasks
+    const decomposedSubtaskQuery = `
+      MATCH (parent:Task {status: 'pending'})-[rel:PARENT_CHILD]->(st:Task)
+      WHERE st.status = 'pending'
+      AND parent.has_children = true
+      AND NOT EXISTS {
+        MATCH (st)-[:DEPENDS_ON]->(dep:Task)
+        WHERE dep.status <> 'done'
+      }
+      AND NOT EXISTS {
+        MATCH (st)-[:PARENT_CHILD]->(:Task)
+      }
+      RETURN st, parent
+      ORDER BY 
+        CASE parent.priority 
+          WHEN 'high' THEN 1 
+          WHEN 'medium' THEN 2 
+          ELSE 3 
+        END,
+        CASE WHEN rel.position IS NOT NULL THEN rel.position ELSE 999 END,
+        st.created_at
+      LIMIT 1
+    `;
+
+    result = await this.execute(decomposedSubtaskQuery);
+    if (result.length > 0) {
+      return result[0].st;
+    }
+
+    // Then check top-level tasks (excluding decomposed ones)
     const taskQuery = `
       MATCH (t:Task)
       WHERE t.status = 'pending'
@@ -258,6 +287,7 @@ export class GraphConnection {
       AND NOT EXISTS {
         MATCH (parent:Task)-[:PARENT_CHILD]->(t)
       }
+      AND (t.has_children IS NULL OR t.has_children = false)
       RETURN t
       ORDER BY 
         CASE t.priority 

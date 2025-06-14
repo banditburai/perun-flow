@@ -3,6 +3,7 @@ import { log } from '../utils/logger.js';
 import { SyncEngine } from './sync-engine.js';
 import { SimpleJournal } from './journal.js';
 import { TaskDecompositionService } from './llm-service.js';
+import { SmartTaskSelector } from './task-selector.js';
 
 /**
  * Core task management logic combining file storage and graph operations
@@ -14,6 +15,7 @@ export class TaskManager {
     this.sync = new SyncEngine(fileStorage, graphConnection);
     this.journal = new SimpleJournal(fileStorage.tasksDir);
     this.decomposition = new TaskDecompositionService(options.decomposition);
+    this.taskSelector = new SmartTaskSelector(graphConnection, options.taskSelection);
   }
 
   /**
@@ -295,12 +297,15 @@ export class TaskManager {
   /**
    * Find the next actionable task
    */
-  async findNextTask() {
+  async findNextTask(context = {}) {
     try {
       // High priority sync: finding next task needs accurate data
       await this.sync.smartSync('high');
 
-      const nextTask = await this.graph.findNextTask();
+      // Use smart task selector if available, otherwise fallback to simple
+      const nextTask = this.taskSelector
+        ? await this.taskSelector.findNextTask(context)
+        : await this.graph.findNextTask();
 
       if (!nextTask) {
         log('info', 'No actionable tasks found');
@@ -313,6 +318,38 @@ export class TaskManager {
       return fullTask;
     } catch (error) {
       log('error', `Failed to find next task: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Find next task with explanation of why it was selected
+   */
+  async findNextTaskWithReason(options = {}) {
+    try {
+      await this.sync.smartSync('high');
+
+      const context = options.context || {};
+      const task = await this.findNextTask(context);
+
+      if (!task) {
+        return { task: null, reason: 'No actionable tasks found' };
+      }
+
+      // Get selection reason if task selector is available
+      const reason = this.taskSelector
+        ? await this.taskSelector.getSelectionReason(task, context)
+        : 'Selected by priority and creation time';
+
+      // Get parent task info if this is a subtask
+      let parentTask = null;
+      if (task.parent_id) {
+        parentTask = await this.getTask(task.parent_id);
+      }
+
+      return { task, reason, parentTask };
+    } catch (error) {
+      log('error', `Failed to find next task with reason: ${error.message}`);
       throw error;
     }
   }
